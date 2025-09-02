@@ -1,0 +1,21 @@
+{
+  "name": "katie-ann-clay-mailer",
+  "version": "1.0.0",
+  "description": "Transactional email service for workshop orders",
+  "main": "index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "echo 'No build step needed for serverless functions'",
+    "deploy": "vercel --prod"
+  },
+  "keywords": ["webflow", "mailchimp", "webhook", "email"],
+  "author": "Luis Palomares",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "crypto": "^1.0.1"
+  },
+  "devDependencies": {
+    "vercel": "^32.0.0"
+  }
+}
