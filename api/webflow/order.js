@@ -3,11 +3,11 @@
  * POST /api/webflow/order
  * 
  * Receives order webhooks from Webflow e-commerce
- * Processes workshop purchases and triggers Mailchimp campaigns
+ * Processes workshop purchases and sends orientation emails via Resend
  */
 
 import { resolveGuidelines } from '../../lib/webflow.js';
-import { upsertMember, triggerCampaign } from '../../lib/mailchimp.js';
+import { sendWorkshopEmail } from '../../lib/resend.js';
 import { withBackoff } from '../../lib/retry.js';
 import crypto from 'crypto';
 
@@ -69,39 +69,34 @@ export default async function handler(req, res) {
           continue;
         }
 
-        // Prepare Mailchimp merge fields
-        const mergeFields = {
-          WS_NAME: guidelines.name || lineItem.name,
-          WS_DATE: guidelines.date || 'TBD',
-          WS_LOC: guidelines.location || 'TBD',
-          WORK_GUIDE: guidelines.guidelinesHtml || 'Guidelines coming soon...'
+        // Prepare workshop data for email
+        const workshopData = {
+          name: guidelines.name || lineItem.name,
+          date: guidelines.date || 'TBD',
+          location: guidelines.location || 'TBD',
+          guidelinesHtml: guidelines.guidelinesHtml || 'Guidelines coming soon...',
+          duration: guidelines.duration,
+          whatToBring: guidelines.whatToBring,
+          parking: guidelines.parking,
+          reschedulePolicy: guidelines.reschedulePolicy,
+          faq: guidelines.faq
         };
 
-        // Prepare tags
-        const tags = [
-          'Buyer-Workshops',
-          `${guidelines.slug || lineItem.productId}-${new Date().toISOString().split('T')[0]}`
-        ];
+        // Prepare customer data
+        const customerData = {
+          customerName: order.customer?.name || order.customer?.firstName || 'Workshop Participant',
+          orderId: orderId
+        };
 
-        // Upsert member in Mailchimp
+        // Send workshop orientation email via Resend
         await withBackoff(() => 
-          upsertMember({
+          sendWorkshopEmail({
             email: customerEmail,
-            mergeFields,
-            tags
+            workshopData,
+            customerData,
+            templateId: process.env.RESEND_TEMPLATE_ID // Optional: use pre-built template
           })
         );
-
-        // Trigger campaign
-        if (process.env.MC_CAMPAIGN_ID) {
-          await withBackoff(() => 
-            triggerCampaign({
-              campaignId: process.env.MC_CAMPAIGN_ID,
-              to: customerEmail,
-              vars: mergeFields
-            })
-          );
-        }
 
         // TODO: Mark as processed (implement idempotency)
         // await markAsProcessed(idempotencyKey);
@@ -109,10 +104,11 @@ export default async function handler(req, res) {
         results.push({
           productId: lineItem.productId,
           status: 'success',
-          guidelines: guidelines.name
+          workshopName: workshopData.name,
+          emailSent: true
         });
 
-        console.log(`Successfully processed workshop ${lineItem.productId} for ${customerEmail}`);
+        console.log(`Successfully sent workshop email for ${workshopData.name} to ${customerEmail}`);
 
       } catch (error) {
         console.error(`Error processing line item ${lineItem.productId}:`, error);

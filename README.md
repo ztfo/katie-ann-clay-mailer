@@ -4,19 +4,18 @@ A transactional email service that automatically sends workshop orientation emai
 
 ## Overview
 
-This service bridges Webflow e-commerce and Mailchimp to create a seamless customer experience:
+This service bridges Webflow e-commerce and Resend to create a seamless customer experience:
 
 1. **Receives** Webflow order webhooks when customers purchase workshops
 2. **Fetches** workshop details from Webflow (product custom fields or CMS collections)
-3. **Updates** Mailchimp audience with customer info and workshop-specific tags
-4. **Triggers** automated emails using pre-built Mailchimp campaigns
-5. **Logs** all activities for monitoring (no PII stored externally)
+3. **Sends** workshop orientation emails via Resend transactional email API
+4. **Logs** all activities for monitoring (no PII stored externally)
 
 ## Tech Stack
 
 - **Service**: Vercel Serverless Functions (Node.js)
 - **Frontend/Site**: Webflow (source of truth for workshop listings)
-- **Email**: Mailchimp Marketing API
+- **Email**: Resend transactional email API
 - **Infrastructure**: Vercel environment variables and logging
 
 ## Project Structure
@@ -28,7 +27,7 @@ This service bridges Webflow e-commerce and Mailchimp to create a seamless custo
 │       └── order.js           # Webflow order webhook handler
 ├── lib/
 │   ├── webflow.js             # Webflow API integration
-│   ├── mailchimp.js           # Mailchimp API integration
+│   ├── resend.js              # Resend API integration
 │   └── retry.js               # Retry logic with exponential backoff
 ├── docs/
 │   └── mailer-plans.md        # Detailed project plan
@@ -50,9 +49,8 @@ cp env.example .env
 Required variables:
 - `WEBFLOW_SITE_ID` - Your Webflow site ID
 - `WEBFLOW_API_TOKEN` - Webflow API token
-- `MAILCHIMP_API_KEY` - Mailchimp API key
-- `MAILCHIMP_SERVER_PREFIX` - Mailchimp server prefix (e.g., us1)
-- `MAILCHIMP_AUDIENCE_ID` - Mailchimp audience/list ID
+- `RESEND_API_KEY` - Resend API key
+- `RESEND_FROM_EMAIL` - Verified sender email address
 
 ### 2. Install Dependencies
 
@@ -83,21 +81,16 @@ npm run deploy
 ### Webflow Webhook
 - **POST** `/api/webflow/order`
 - Receives order webhooks from Webflow e-commerce
-- Processes workshop purchases and triggers Mailchimp campaigns
+- Processes workshop purchases and sends orientation emails via Resend
 
 ## Configuration
 
-### Mailchimp Setup
+### Resend Setup
 
-1. Create merge fields in your audience:
-   - `WS_NAME` (Text) - Workshop name
-   - `WS_DATE` (Text) - Workshop date
-   - `WS_LOC` (Text) - Workshop location
-   - `WORK_GUIDE` (Text/HTML) - Workshop guidelines
-
-2. Create a "Workshop Orientation" campaign/automation that:
-   - Triggers when specific tags are applied
-   - Uses merge fields: `*|WS_NAME|*`, `*|WORK_GUIDE|*`, etc.
+1. Create a Resend account at [resend.com](https://resend.com)
+2. Verify your sender domain or use a verified email address
+3. Get your API key from the Resend dashboard
+4. Optionally create email templates in Resend for consistent branding
 
 ### Webflow Setup
 
@@ -114,6 +107,10 @@ npm run deploy
 ### Testing
 
 Test the webhook locally using a tool like ngrok or by deploying to a staging environment.
+
+### Email Templates
+
+The service includes a built-in HTML email template that automatically formats workshop information. You can also use Resend's template system for more advanced customization.
 
 ### Logs
 
@@ -134,7 +131,8 @@ All processing is logged to Vercel console. No PII is stored externally.
 
 ## Future Enhancements
 
-- iCal attachment generation
-- Multi-language campaigns
-- Per-workshop campaign templates
+- iCal attachment generation for workshop dates
+- Multi-language email templates
+- Per-workshop email templates
 - Admin UI for managing and retriggering emails
+- Email analytics and delivery tracking
