@@ -2,7 +2,7 @@
  * Health check endpoint
  * GET /api/health
  */
-export default function handler(req, res) {
+module.exports = function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -12,4 +12,4 @@ export default function handler(req, res) {
     timestamp: new Date().toISOString(),
     service: 'katie-ann-clay-mailer'
   });
-}
+};

@@ -6,12 +6,12 @@
  * Processes workshop purchases and sends orientation emails via Resend
  */
 
-import { resolveGuidelines } from '../../lib/webflow.js';
-import { sendWorkshopEmail } from '../../lib/resend.js';
-import { withBackoff } from '../../lib/retry.js';
-import crypto from 'crypto';
+const { resolveGuidelines } = require('../../lib/webflow.js');
+const { sendWorkshopEmail } = require('../../lib/resend.js');
+const { withBackoff } = require('../../lib/retry.js');
+const crypto = require('crypto');
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   // Only allow POST requests
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
