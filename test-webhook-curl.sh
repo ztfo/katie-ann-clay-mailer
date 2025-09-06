@@ -7,7 +7,7 @@ echo "🧪 Testing Webflow Order Webhook with Curl..."
 echo ""
 
 # Your production webhook URL
-WEBHOOK_URL="https://katie-ann-clay-mailer-iipqcek2r-ztfo-projects.vercel.app/api/webflow/order"
+WEBHOOK_URL="https://katie-ann-clay-mailer.vercel.app/api/webflow/order"
 
 # Sample order payload (simulating Webflow's webhook format)
 curl -X POST "$WEBHOOK_URL" \
@@ -16,7 +16,7 @@ curl -X POST "$WEBHOOK_URL" \
   -d '{
     "orderId": "test-order-' $(date +%s) '",
     "customer": {
-      "email": "test@example.com",
+      "email": "katiealehn@gmail.com",
       "name": "Jane Smith",
       "firstName": "Jane",
       "lastName": "Smith"
@@ -44,4 +44,4 @@ curl -X POST "$WEBHOOK_URL" \
 
 echo ""
 echo "✅ Webhook test completed!"
-echo "📧 Check your email (test@example.com) for the workshop orientation email"
+echo "📧 Check your email (katiealehn@gmail.com) for the workshop orientation email"
