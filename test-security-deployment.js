@@ -66,10 +66,17 @@ async function testSecurityDeployment() {
 }
 
 function createWebhookSignature(payload, secret) {
-  return crypto
-    .createHmac('sha256', secret)
-    .update(JSON.stringify(payload))
-    .digest('hex');
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const rawBody = JSON.stringify(payload);
+  const content = `${timestamp}:${rawBody}`;
+  
+  return {
+    signature: crypto
+      .createHmac('sha256', secret)
+      .update(content)
+      .digest('hex'),
+    timestamp: timestamp
+  };
 }
 
 async function testValidWebhook(webhookUrl, secret) {
@@ -80,7 +87,7 @@ async function testValidWebhook(webhookUrl, secret) {
       "status": "unfulfilled",
       "customerInfo": {
         "fullName": "Security Test Customer",
-        "email": process.env.RESEND_FROM_EMAIL || "test@example.com"
+        "email": "luis.palomares.e7@gmail.com"
       },
       "purchasedItems": [
         {
@@ -92,10 +99,10 @@ async function testValidWebhook(webhookUrl, secret) {
     }
   };
   
-  const signature = createWebhookSignature(validPayload, secret);
+  const { signature, timestamp } = createWebhookSignature(validPayload, secret);
   
   try {
-    const response = await makeRequest(webhookUrl, validPayload, signature);
+    const response = await makeRequest(webhookUrl, validPayload, signature, timestamp);
     
     // ACTUALLY TEST: Check if response is 200 and has success: true
     if (response.status === 200) {
@@ -138,7 +145,7 @@ async function testInvalidSignature(webhookUrl) {
     "triggerType": "ecomm_new_order",
     "payload": {
       "orderId": "test-invalid-sig",
-      "customerInfo": { "email": "test@example.com" },
+      "customerInfo": { "email": "luis.palomares.e7@gmail.com" },
       "purchasedItems": [{ "productId": "test123" }]
     }
   };
@@ -146,7 +153,7 @@ async function testInvalidSignature(webhookUrl) {
   const invalidSignature = "invalid_signature_12345";
   
   try {
-    const response = await makeRequest(webhookUrl, payload, invalidSignature);
+    const response = await makeRequest(webhookUrl, payload, invalidSignature, null);
     
     // ACTUALLY TEST: Check if we get 401 for invalid signature
     if (response.status === 401) {
@@ -169,13 +176,13 @@ async function testMissingSignature(webhookUrl) {
     "triggerType": "ecomm_new_order",
     "payload": {
       "orderId": "test-missing-sig",
-      "customerInfo": { "email": "test@example.com" },
+      "customerInfo": { "email": "luis.palomares.e7@gmail.com" },
       "purchasedItems": [{ "productId": "test123" }]
     }
   };
   
   try {
-    const response = await makeRequest(webhookUrl, payload, null);
+    const response = await makeRequest(webhookUrl, payload, null, null);
     
     // ACTUALLY TEST: Check if we get 401 for missing signature
     if (response.status === 401) {
@@ -203,10 +210,10 @@ async function testInvalidPayload(webhookUrl, secret) {
     }
   };
   
-  const signature = createWebhookSignature(invalidPayload, secret);
+  const { signature, timestamp } = createWebhookSignature(invalidPayload, secret);
   
   try {
-    const response = await makeRequest(webhookUrl, invalidPayload, signature);
+    const response = await makeRequest(webhookUrl, invalidPayload, signature, timestamp);
     
     // ACTUALLY TEST: Check if invalid payload is rejected (200 with success=false is OK)
     if (response.status === 200) {
@@ -231,7 +238,7 @@ async function testInvalidPayload(webhookUrl, secret) {
   }
 }
 
-async function makeRequest(url, payload, signature) {
+async function makeRequest(url, payload, signature, timestamp) {
   const https = require('https');
   const postData = JSON.stringify(payload);
   
@@ -244,7 +251,11 @@ async function makeRequest(url, payload, signature) {
   };
   
   if (signature) {
-    options.headers['X-Webflow-Signature'] = signature;
+    options.headers['x-webflow-signature'] = signature;
+  }
+  
+  if (timestamp) {
+    options.headers['x-webflow-timestamp'] = timestamp;
   }
   
   return new Promise((resolve, reject) => {

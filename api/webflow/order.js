@@ -22,16 +22,19 @@ const MAX_CACHE_SIZE = 1000; // Prevent memory leaks
  * @param {string} secret - Webhook secret from environment
  * @returns {boolean} True if signature is valid
  */
-function verifyWebhookSignature(payload, signature, secret) {
-  if (!signature || !secret) {
-    console.warn('Missing webhook signature or secret');
+function verifyWebhookSignature(rawBody, signature, timestamp, secret) {
+  if (!signature || !timestamp || !secret) {
+    console.warn('Missing webhook signature, timestamp, or secret');
     return false;
   }
   
   try {
+    // Webflow signature format: timestamp:rawBody
+    const content = `${timestamp}:${rawBody}`;
+    
     const expectedSignature = crypto
       .createHmac('sha256', secret)
-      .update(JSON.stringify(payload))
+      .update(content)
       .digest('hex');
       
     return crypto.timingSafeEqual(
@@ -153,7 +156,39 @@ module.exports = async function handler(req, res) {
       console.log(`[${requestId}] Environment validation passed`);
     }
 
-    // Parse webhook payload first
+    // Get raw body for signature verification
+    const rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+    
+    // Verify webhook signature for security (using raw body)
+    const signature = req.headers['x-webflow-signature'];
+    const timestamp = req.headers['x-webflow-timestamp'];
+    const secret = process.env.WEBFLOW_WEBHOOK_SECRET;
+    
+    if (isDebugMode) {
+      console.log(`[${requestId}] Verifying webhook signature`, {
+        hasSignature: !!signature,
+        hasTimestamp: !!timestamp,
+        hasSecret: !!secret,
+        signatureLength: signature ? signature.length : 0,
+        timestamp: timestamp
+      });
+    }
+    
+    if (!verifyWebhookSignature(rawBody, signature, timestamp, secret)) {
+      console.warn(`[${requestId}] Invalid webhook signature received`, {
+        ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+        userAgent: req.headers['user-agent']?.substring(0, 50) + '...',
+        signature: signature ? signature.substring(0, 8) + '...' : 'missing',
+        timestamp: timestamp
+      });
+      return res.status(401).json({ error: 'Invalid signature' });
+    }
+    
+    if (isDebugMode) {
+      console.log(`[${requestId}] Webhook signature verified successfully`);
+    }
+    
+    // Parse webhook payload after signature verification
     let payload;
     try {
       payload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
@@ -167,31 +202,6 @@ module.exports = async function handler(req, res) {
     } catch (parseError) {
       console.error(`[${requestId}] Failed to parse webhook payload:`, parseError);
       return res.status(400).json({ error: 'Invalid JSON payload' });
-    }
-
-    // Verify webhook signature for security
-    const signature = req.headers['x-webflow-signature'];
-    const secret = process.env.WEBFLOW_WEBHOOK_SECRET;
-    
-    if (isDebugMode) {
-      console.log(`[${requestId}] Verifying webhook signature`, {
-        hasSignature: !!signature,
-        hasSecret: !!secret,
-        signatureLength: signature ? signature.length : 0
-      });
-    }
-    
-    if (!verifyWebhookSignature(payload, signature, secret)) {
-      console.warn(`[${requestId}] Invalid webhook signature received`, {
-        ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
-        userAgent: req.headers['user-agent']?.substring(0, 50) + '...',
-        signature: signature ? signature.substring(0, 8) + '...' : 'missing'
-      });
-      return res.status(401).json({ error: 'Invalid signature' });
-    }
-    
-    if (isDebugMode) {
-      console.log(`[${requestId}] Webhook signature verified successfully`);
     }
     
     // Validate webhook payload

@@ -52,13 +52,13 @@ async function testWithRealWebflowData() {
         "status": "unfulfilled",
         "createdOn": new Date().toISOString(),
         "customer": {
-          "email": process.env.RESEND_FROM_EMAIL || "test@katieannclay.com",
+          "email": "luis.palomares.e7@gmail.com",
           "name": "Real Data Test Customer",
           "firstName": "Real",
           "lastName": "Customer"
         },
         "customerInfo": {
-          "email": process.env.RESEND_FROM_EMAIL || "test@katieannclay.com",
+          "email": "luis.palomares.e7@gmail.com",
           "fullName": "Real Data Test Customer"
         },
         "lineItems": [
@@ -82,7 +82,7 @@ async function testWithRealWebflowData() {
       }
     };
     
-    const signature = createWebhookSignature(realOrderPayload, webhookSecret);
+    const { signature, timestamp } = createWebhookSignature(realOrderPayload, webhookSecret);
     
     console.log('\n📋 SENDING REAL ORDER WITH ACTUAL WEBFLOW DATA...');
     console.log(`   Order ID: ${realOrderPayload.payload.orderId}`);
@@ -91,7 +91,7 @@ async function testWithRealWebflowData() {
     console.log(`   Product ID: ${realProduct.id}`);
     console.log(`   Price: $${realProduct.price}`);
     
-    const response = await makeRequest(webhookUrl, realOrderPayload, signature);
+    const response = await makeRequest(webhookUrl, realOrderPayload, signature, timestamp);
     
     console.log('\n📊 RESPONSE ANALYSIS:');
     console.log('====================');
@@ -157,13 +157,20 @@ async function testWithRealWebflowData() {
 }
 
 function createWebhookSignature(payload, secret) {
-  return crypto
-    .createHmac('sha256', secret)
-    .update(JSON.stringify(payload))
-    .digest('hex');
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+  const rawBody = JSON.stringify(payload);
+  const content = `${timestamp}:${rawBody}`;
+  
+  return {
+    signature: crypto
+      .createHmac('sha256', secret)
+      .update(content)
+      .digest('hex'),
+    timestamp: timestamp
+  };
 }
 
-async function makeRequest(url, payload, signature) {
+async function makeRequest(url, payload, signature, timestamp) {
   const https = require('https');
   const postData = JSON.stringify(payload);
   
@@ -171,10 +178,17 @@ async function makeRequest(url, payload, signature) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Content-Length': Buffer.byteLength(postData),
-      'x-webflow-signature': signature
+      'Content-Length': Buffer.byteLength(postData)
     }
   };
+  
+  if (signature) {
+    options.headers['x-webflow-signature'] = signature;
+  }
+  
+  if (timestamp) {
+    options.headers['x-webflow-timestamp'] = timestamp;
+  }
   
   return new Promise((resolve, reject) => {
     const req = https.request(url, options, (res) => {
