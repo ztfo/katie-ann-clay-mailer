@@ -1,9 +1,6 @@
 /**
  * Webflow Order Webhook Handler
- * POST /api/webflow/order
- * 
- * Receives order webhooks from Webflow e-commerce
- * Processes workshop purchases and sends orientation emails via Resend
+ * Processes workshop purchases and sends orientation emails
  */
 
 const { resolveGuidelines, isWorkshopProduct } = require('../../lib/webflow.js');
@@ -11,16 +8,11 @@ const { sendWorkshopEmail } = require('../../lib/resend.js');
 const { withBackoff } = require('../../lib/retry.js');
 const crypto = require('crypto');
 
-// In-memory store for idempotency (in production, use Redis or database)
 const processedOrders = new Map();
-const MAX_CACHE_SIZE = 1000; // Prevent memory leaks
+const MAX_CACHE_SIZE = 1000;
 
 /**
- * Verify webhook signature to ensure request is from Webflow
- * @param {Object} payload - Request body
- * @param {string} signature - X-Webflow-Signature header
- * @param {string} secret - Webhook secret from environment
- * @returns {boolean} True if signature is valid
+ * Verify webhook signature
  */
 function verifyWebhookSignature(rawBody, signature, timestamp, secret) {
   if (!signature || !timestamp || !secret) {
@@ -49,7 +41,6 @@ function verifyWebhookSignature(rawBody, signature, timestamp, secret) {
 
 /**
  * Validate required environment variables
- * @throws {Error} If any required variables are missing
  */
 function validateEnvironment() {
   const required = ['WEBFLOW_SITE_ID', 'WEBFLOW_API_TOKEN', 'RESEND_API_KEY', 'RESEND_FROM_EMAIL'];
@@ -61,9 +52,6 @@ function validateEnvironment() {
 
 /**
  * Validate webhook payload structure
- * @param {Object} payload - Webhook payload
- * @returns {Object} Validated payload with customerEmail and lineItems
- * @throws {Error} If payload is invalid
  */
 function validateWebhookPayload(payload) {
   if (!payload || typeof payload !== 'object') {
@@ -88,23 +76,17 @@ function validateWebhookPayload(payload) {
 }
 
 /**
- * Check if an order has already been processed (idempotency)
- * @param {string} idempotencyKey - Unique key for the order
- * @returns {boolean} True if already processed
+ * Check if an order has already been processed
  */
 function isAlreadyProcessed(idempotencyKey) {
   return processedOrders.has(idempotencyKey);
 }
 
 /**
- * Mark an order as processed (idempotency)
- * @param {string} idempotencyKey - Unique key for the order
- * @param {Object} result - Processing result to store
+ * Mark an order as processed
  */
 function markAsProcessed(idempotencyKey, result) {
-  // Prevent memory leaks by limiting cache size
   if (processedOrders.size >= MAX_CACHE_SIZE) {
-    // Remove oldest entries (simple FIFO)
     const firstKey = processedOrders.keys().next().value;
     processedOrders.delete(firstKey);
   }
@@ -118,7 +100,7 @@ function markAsProcessed(idempotencyKey, result) {
 module.exports = async function handler(req, res) {
   const requestId = crypto.randomBytes(8).toString('hex');
   const startTime = Date.now();
-  const isDebugMode = false; // Debug logging disabled for production
+  const isDebugMode = false;
   
   if (isDebugMode) {
     console.log(`[${requestId}] Webhook request started`, {
@@ -132,13 +114,10 @@ module.exports = async function handler(req, res) {
     });
   }
 
-  // Set security headers
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Content-Type', 'application/json');
-
-  // Only allow POST requests
   if (req.method !== 'POST') {
     if (isDebugMode) {
       console.log(`[${requestId}] Invalid method: ${req.method}`);
@@ -147,7 +126,6 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    // Validate environment variables
     if (isDebugMode) {
       console.log(`[${requestId}] Validating environment variables`);
     }
@@ -156,10 +134,8 @@ module.exports = async function handler(req, res) {
       console.log(`[${requestId}] Environment validation passed`);
     }
 
-    // Get raw body for signature verification
     const rawBody = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
     
-    // Verify webhook signature for security (using raw body)
     const signature = req.headers['x-webflow-signature'];
     const timestamp = req.headers['x-webflow-timestamp'];
     const secret = process.env.WEBFLOW_WEBHOOK_SECRET;
@@ -188,7 +164,6 @@ module.exports = async function handler(req, res) {
       console.log(`[${requestId}] Webhook signature verified successfully`);
     }
     
-    // Parse webhook payload after signature verification
     let payload;
     try {
       payload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
@@ -203,8 +178,6 @@ module.exports = async function handler(req, res) {
       console.error(`[${requestId}] Failed to parse webhook payload:`, parseError);
       return res.status(400).json({ error: 'Invalid JSON payload' });
     }
-    
-    // Validate webhook payload
     if (isDebugMode) {
       console.log(`[${requestId}] Validating webhook payload`);
     }
@@ -230,7 +203,6 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // Process each line item (workshop)
     const results = [];
     
     for (const lineItem of lineItems) {
@@ -243,7 +215,6 @@ module.exports = async function handler(req, res) {
       }
       
       try {
-        // Generate idempotency key to prevent duplicate processing
         const idempotencyKey = crypto
           .createHash('sha256')
           .update(`${orderId}-${customerEmail}-${lineItem.productId}`)
@@ -253,7 +224,6 @@ module.exports = async function handler(req, res) {
           console.log(`[${requestId}] Generated idempotency key: ${idempotencyKey.substring(0, 8)}...`);
         }
 
-        // Check if already processed (idempotency)
         if (isAlreadyProcessed(idempotencyKey)) {
           if (isDebugMode) {
             console.log(`[${requestId}] Order ${orderId} already processed, skipping`);
@@ -265,8 +235,6 @@ module.exports = async function handler(req, res) {
           });
           continue;
         }
-
-        // First, check if this is a workshop product
         if (isDebugMode) {
           console.log(`[${requestId}] Fetching product data from Webflow`, {
             productId: lineItem.productId
@@ -298,7 +266,6 @@ module.exports = async function handler(req, res) {
           continue;
         }
 
-        // Fetch workshop guidelines and metadata
         if (isDebugMode) {
           console.log(`[${requestId}] Fetching workshop guidelines`, {
             productId: lineItem.productId
@@ -329,7 +296,6 @@ module.exports = async function handler(req, res) {
           continue;
         }
 
-        // Prepare workshop data for email
         const workshopData = {
           name: guidelines.name || lineItem.name,
           date: guidelines.date || 'TBD',
@@ -351,7 +317,6 @@ module.exports = async function handler(req, res) {
           });
         }
 
-        // Prepare customer data
         const customerData = {
           customerName: orderData.customer?.name || orderData.customer?.firstName || 'Workshop Participant',
           orderId: orderId
@@ -364,7 +329,6 @@ module.exports = async function handler(req, res) {
           });
         }
 
-        // Send workshop orientation email via Resend
         if (isDebugMode) {
           console.log(`[${requestId}] Sending workshop email`, {
             email: customerEmail?.substring(0, 3) + '***@' + customerEmail?.split('@')[1],
@@ -378,7 +342,7 @@ module.exports = async function handler(req, res) {
             email: customerEmail,
             workshopData,
             customerData,
-            templateId: process.env.RESEND_TEMPLATE_ID // Optional: use pre-built template
+            templateId: process.env.RESEND_TEMPLATE_ID
           })
         );
         
@@ -386,7 +350,6 @@ module.exports = async function handler(req, res) {
           console.log(`[${requestId}] Workshop email sent successfully`);
         }
 
-        // Mark as processed (idempotency)
         const result = {
           productId: lineItem.productId,
           status: 'success',
@@ -419,7 +382,6 @@ module.exports = async function handler(req, res) {
     const errorCount = results.filter(r => r.status === 'error').length;
     const skippedCount = results.filter(r => r.status === 'skipped').length;
 
-    // Always log summary (not sensitive)
     console.log(`[${requestId}] Order processing completed`, {
       orderId,
       processingTimeMs: processingTime,
@@ -441,7 +403,6 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // Always return 200 to prevent Webflow retries
     res.status(200).json({
       success: true,
       orderId,
@@ -461,7 +422,6 @@ module.exports = async function handler(req, res) {
       orderId: req.body?.payload?.orderId || req.body?.payload?.id || 'unknown'
     });
     
-    // Don't expose internal error details to public
     const isValidationError = error.message.includes('Invalid') || error.message.includes('Missing');
     const errorMessage = isValidationError ? error.message : 'Internal processing error';
     
@@ -470,8 +430,6 @@ module.exports = async function handler(req, res) {
       isValidationError,
       processingTimeMs: processingTime
     });
-    
-    // Return 200 to prevent retry storms from Webflow
     res.status(200).json({
       success: false,
       error: errorMessage,
