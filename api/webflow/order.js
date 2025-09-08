@@ -118,7 +118,7 @@ function markAsProcessed(idempotencyKey, result) {
 module.exports = async function handler(req, res) {
   const requestId = crypto.randomBytes(8).toString('hex');
   const startTime = Date.now();
-  const isDebugMode = process.env.DEBUG_LOGGING === 'true';
+  const isDebugMode = false; // Debug logging disabled for production
   
   if (isDebugMode) {
     console.log(`[${requestId}] Webhook request started`, {
