@@ -113,6 +113,22 @@ function markAsProcessed(idempotencyKey, result) {
 }
 
 module.exports = async function handler(req, res) {
+  const requestId = crypto.randomBytes(8).toString('hex');
+  const startTime = Date.now();
+  const isDebugMode = process.env.DEBUG_LOGGING === 'true';
+  
+  if (isDebugMode) {
+    console.log(`[${requestId}] Webhook request started`, {
+      method: req.method,
+      headers: {
+        'content-type': req.headers['content-type'],
+        'user-agent': req.headers['user-agent']?.substring(0, 50) + '...',
+        'x-forwarded-for': req.headers['x-forwarded-for']
+      },
+      bodySize: req.body ? JSON.stringify(req.body).length : 0
+    });
+  }
+
   // Set security headers
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
@@ -121,36 +137,101 @@ module.exports = async function handler(req, res) {
 
   // Only allow POST requests
   if (req.method !== 'POST') {
+    if (isDebugMode) {
+      console.log(`[${requestId}] Invalid method: ${req.method}`);
+    }
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
     // Validate environment variables
+    if (isDebugMode) {
+      console.log(`[${requestId}] Validating environment variables`);
+    }
     validateEnvironment();
+    if (isDebugMode) {
+      console.log(`[${requestId}] Environment validation passed`);
+    }
+
+    // Parse webhook payload first
+    let payload;
+    try {
+      payload = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+      if (isDebugMode) {
+        console.log(`[${requestId}] Payload parsed successfully`, {
+          triggerType: payload.triggerType,
+          hasPayload: !!payload.payload,
+          payloadKeys: payload.payload ? Object.keys(payload.payload) : []
+        });
+      }
+    } catch (parseError) {
+      console.error(`[${requestId}] Failed to parse webhook payload:`, parseError);
+      return res.status(400).json({ error: 'Invalid JSON payload' });
+    }
 
     // Verify webhook signature for security
     const signature = req.headers['x-webflow-signature'];
     const secret = process.env.WEBFLOW_WEBHOOK_SECRET;
     
-    if (!verifyWebhookSignature(req.body, signature, secret)) {
-      console.warn('Invalid webhook signature received', {
+    if (isDebugMode) {
+      console.log(`[${requestId}] Verifying webhook signature`, {
+        hasSignature: !!signature,
+        hasSecret: !!secret,
+        signatureLength: signature ? signature.length : 0
+      });
+    }
+    
+    if (!verifyWebhookSignature(payload, signature, secret)) {
+      console.warn(`[${requestId}] Invalid webhook signature received`, {
         ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
-        userAgent: req.headers['user-agent']
+        userAgent: req.headers['user-agent']?.substring(0, 50) + '...',
+        signature: signature ? signature.substring(0, 8) + '...' : 'missing'
       });
       return res.status(401).json({ error: 'Invalid signature' });
     }
-
-    // Validate and parse webhook payload
-    const { customerEmail, lineItems, orderData } = validateWebhookPayload(req.body);
+    
+    if (isDebugMode) {
+      console.log(`[${requestId}] Webhook signature verified successfully`);
+    }
+    
+    // Validate webhook payload
+    if (isDebugMode) {
+      console.log(`[${requestId}] Validating webhook payload`);
+    }
+    const { customerEmail, lineItems, orderData } = validateWebhookPayload(payload);
+    if (isDebugMode) {
+      console.log(`[${requestId}] Payload validation passed`, {
+        customerEmail: customerEmail?.substring(0, 3) + '***@' + customerEmail?.split('@')[1],
+        lineItemsCount: lineItems.length,
+        orderId: orderData.orderId || orderData.id
+      });
+    }
 
     const orderId = orderData.orderId || orderData.id;
     
-    console.log(`Processing order ${orderId}`);
+    if (isDebugMode) {
+      console.log(`[${requestId}] Processing order ${orderId}`, {
+        customerEmail: customerEmail?.substring(0, 3) + '***@' + customerEmail?.split('@')[1],
+        lineItems: lineItems.map(item => ({
+          productId: item.productId,
+          name: item.name,
+          quantity: item.quantity
+        }))
+      });
+    }
 
     // Process each line item (workshop)
     const results = [];
     
     for (const lineItem of lineItems) {
+      if (isDebugMode) {
+        console.log(`[${requestId}] Processing line item`, {
+          productId: lineItem.productId,
+          name: lineItem.name,
+          quantity: lineItem.quantity
+        });
+      }
+      
       try {
         // Generate idempotency key to prevent duplicate processing
         const idempotencyKey = crypto
@@ -158,9 +239,15 @@ module.exports = async function handler(req, res) {
           .update(`${orderId}-${customerEmail}-${lineItem.productId}`)
           .digest('hex');
 
+        if (isDebugMode) {
+          console.log(`[${requestId}] Generated idempotency key: ${idempotencyKey.substring(0, 8)}...`);
+        }
+
         // Check if already processed (idempotency)
         if (isAlreadyProcessed(idempotencyKey)) {
-          console.log(`Order ${orderId} already processed, skipping`);
+          if (isDebugMode) {
+            console.log(`[${requestId}] Order ${orderId} already processed, skipping`);
+          }
           results.push({
             productId: lineItem.productId,
             status: 'skipped',
@@ -170,12 +257,29 @@ module.exports = async function handler(req, res) {
         }
 
         // First, check if this is a workshop product
+        if (isDebugMode) {
+          console.log(`[${requestId}] Fetching product data from Webflow`, {
+            productId: lineItem.productId
+          });
+        }
+        
         const productResponse = await withBackoff(() => 
           require('../../lib/webflow.js').getProduct(process.env.WEBFLOW_SITE_ID, lineItem.productId)
         );
         
+        if (isDebugMode) {
+          console.log(`[${requestId}] Product data fetched`, {
+            productId: lineItem.productId,
+            productName: productResponse.product?.name,
+            hasProduct: !!productResponse.product,
+            isWorkshop: isWorkshopProduct(productResponse.product)
+          });
+        }
+        
         if (!isWorkshopProduct(productResponse.product)) {
-          console.log(`Product ${lineItem.productId} is not a workshop, skipping email`);
+          if (isDebugMode) {
+            console.log(`[${requestId}] Product ${lineItem.productId} is not a workshop, skipping email`);
+          }
           results.push({
             productId: lineItem.productId,
             status: 'skipped',
@@ -185,14 +289,33 @@ module.exports = async function handler(req, res) {
         }
 
         // Fetch workshop guidelines and metadata
+        if (isDebugMode) {
+          console.log(`[${requestId}] Fetching workshop guidelines`, {
+            productId: lineItem.productId
+          });
+        }
+        
         const guidelines = await withBackoff(() => 
           resolveGuidelines(process.env.WEBFLOW_SITE_ID, {
             productId: lineItem.productId
           })
         );
 
+        if (isDebugMode) {
+          console.log(`[${requestId}] Guidelines fetched`, {
+            productId: lineItem.productId,
+            hasGuidelines: !!guidelines,
+            guidelinesKeys: guidelines ? Object.keys(guidelines) : []
+          });
+        }
+
         if (!guidelines) {
-          console.error(`No guidelines found for product ${lineItem.productId}`);
+          console.error(`[${requestId}] No guidelines found for product ${lineItem.productId}`);
+          results.push({
+            productId: lineItem.productId,
+            status: 'error',
+            error: 'No guidelines found for workshop'
+          });
           continue;
         }
 
@@ -209,13 +332,37 @@ module.exports = async function handler(req, res) {
           faq: guidelines.faq
         };
 
+        if (isDebugMode) {
+          console.log(`[${requestId}] Workshop data prepared`, {
+            name: workshopData.name,
+            date: workshopData.date,
+            location: workshopData.location,
+            hasGuidelinesHtml: !!workshopData.guidelinesHtml
+          });
+        }
+
         // Prepare customer data
         const customerData = {
-          customerName: order.customer?.name || order.customer?.firstName || 'Workshop Participant',
+          customerName: orderData.customer?.name || orderData.customer?.firstName || 'Workshop Participant',
           orderId: orderId
         };
 
+        if (isDebugMode) {
+          console.log(`[${requestId}] Customer data prepared`, {
+            customerName: customerData.customerName,
+            orderId: customerData.orderId
+          });
+        }
+
         // Send workshop orientation email via Resend
+        if (isDebugMode) {
+          console.log(`[${requestId}] Sending workshop email`, {
+            email: customerEmail?.substring(0, 3) + '***@' + customerEmail?.split('@')[1],
+            workshopName: workshopData.name,
+            hasTemplateId: !!process.env.RESEND_TEMPLATE_ID
+          });
+        }
+        
         await withBackoff(() => 
           sendWorkshopEmail({
             email: customerEmail,
@@ -224,6 +371,10 @@ module.exports = async function handler(req, res) {
             templateId: process.env.RESEND_TEMPLATE_ID // Optional: use pre-built template
           })
         );
+        
+        if (isDebugMode) {
+          console.log(`[${requestId}] Workshop email sent successfully`);
+        }
 
         // Mark as processed (idempotency)
         const result = {
@@ -239,7 +390,12 @@ module.exports = async function handler(req, res) {
         console.log(`Successfully sent workshop email for ${workshopData.name}`);
 
       } catch (error) {
-        console.error(`Error processing line item ${lineItem.productId}:`, error);
+        console.error(`[${requestId}] Error processing line item ${lineItem.productId}:`, {
+          error: error.message,
+          stack: error.stack,
+          productId: lineItem.productId,
+          orderId
+        });
         results.push({
           productId: lineItem.productId,
           status: 'error',
@@ -248,27 +404,69 @@ module.exports = async function handler(req, res) {
       }
     }
 
+    const processingTime = Date.now() - startTime;
+    const successCount = results.filter(r => r.status === 'success').length;
+    const errorCount = results.filter(r => r.status === 'error').length;
+    const skippedCount = results.filter(r => r.status === 'skipped').length;
+
+    // Always log summary (not sensitive)
+    console.log(`[${requestId}] Order processing completed`, {
+      orderId,
+      processingTimeMs: processingTime,
+      results: {
+        total: results.length,
+        success: successCount,
+        error: errorCount,
+        skipped: skippedCount
+      }
+    });
+
+    if (isDebugMode) {
+      console.log(`[${requestId}] Detailed results`, {
+        results: results.map(r => ({
+          productId: r.productId,
+          status: r.status,
+          error: r.error || r.reason
+        }))
+      });
+    }
+
     // Always return 200 to prevent Webflow retries
     res.status(200).json({
       success: true,
       orderId,
       customerEmail,
       results,
-      processedAt: new Date().toISOString()
+      processedAt: new Date().toISOString(),
+      processingTimeMs: processingTime
     });
 
   } catch (error) {
-    console.error('Webhook processing error:', error);
+    const processingTime = Date.now() - startTime;
+    
+    console.error(`[${requestId}] Webhook processing error:`, {
+      error: error.message,
+      stack: error.stack,
+      processingTimeMs: processingTime,
+      orderId: req.body?.payload?.orderId || req.body?.payload?.id || 'unknown'
+    });
     
     // Don't expose internal error details to public
     const isValidationError = error.message.includes('Invalid') || error.message.includes('Missing');
     const errorMessage = isValidationError ? error.message : 'Internal processing error';
     
+    console.log(`[${requestId}] Returning error response`, {
+      errorMessage,
+      isValidationError,
+      processingTimeMs: processingTime
+    });
+    
     // Return 200 to prevent retry storms from Webflow
     res.status(200).json({
       success: false,
       error: errorMessage,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      processingTimeMs: processingTime
     });
   }
 }
