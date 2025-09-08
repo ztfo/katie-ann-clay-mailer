@@ -26,24 +26,35 @@ module.exports = async function handler(req, res) {
 
     const order = req.body;
     
-    // Validate required order data
-    if (!order.customer?.email || !order.lineItems?.length) {
+    // Process webhook payload
+
+    // Handle Webflow's actual payload structure
+    // Webflow sends: { triggerType: "ecomm_new_order", payload: { ... } }
+    const orderData = order.payload || order;
+    
+    // Validate required order data - check multiple possible structures
+    const customerEmail = orderData.customer?.email || orderData.customerInfo?.email;
+    const lineItems = orderData.lineItems || orderData.purchasedItems || orderData.items || [];
+    
+    if (!customerEmail || !lineItems.length) {
       console.error('Invalid order payload:', { 
-        hasEmail: !!order.customer?.email, 
-        hasLineItems: !!order.lineItems?.length 
+        hasEmail: !!customerEmail, 
+        hasLineItems: !!lineItems.length,
+        payloadKeys: Object.keys(order),
+        customerKeys: orderData.customer ? Object.keys(orderData.customer) : 'no customer',
+        customerInfoKeys: orderData.customerInfo ? Object.keys(orderData.customerInfo) : 'no customerInfo'
       });
       return res.status(400).json({ error: 'Invalid order payload' });
     }
 
-    const customerEmail = order.customer.email;
-    const orderId = order.orderId;
+    const orderId = orderData.orderId || orderData.id;
     
-    console.log(`Processing order ${orderId} for ${customerEmail}`);
+    console.log(`Processing order ${orderId}`);
 
     // Process each line item (workshop)
     const results = [];
     
-    for (const lineItem of order.lineItems) {
+    for (const lineItem of lineItems) {
       try {
         // Generate idempotency key to prevent duplicate processing
         const idempotencyKey = crypto
@@ -123,7 +134,7 @@ module.exports = async function handler(req, res) {
           emailSent: true
         });
 
-        console.log(`Successfully sent workshop email for ${workshopData.name} to ${customerEmail}`);
+        console.log(`Successfully sent workshop email for ${workshopData.name}`);
 
       } catch (error) {
         console.error(`Error processing line item ${lineItem.productId}:`, error);
