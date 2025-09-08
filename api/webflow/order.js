@@ -6,7 +6,7 @@
  * Processes workshop purchases and sends orientation emails via Resend
  */
 
-const { resolveGuidelines } = require('../../lib/webflow.js');
+const { resolveGuidelines, isWorkshopProduct } = require('../../lib/webflow.js');
 const { sendWorkshopEmail } = require('../../lib/resend.js');
 const { withBackoff } = require('../../lib/retry.js');
 const crypto = require('crypto');
@@ -56,6 +56,21 @@ module.exports = async function handler(req, res) {
         //   console.log(`Order ${orderId} already processed, skipping`);
         //   continue;
         // }
+
+        // First, check if this is a workshop product
+        const productResponse = await withBackoff(() => 
+          require('../../lib/webflow.js').getProduct(process.env.WEBFLOW_SITE_ID, lineItem.productId)
+        );
+        
+        if (!isWorkshopProduct(productResponse.product)) {
+          console.log(`Product ${lineItem.productId} is not a workshop, skipping email`);
+          results.push({
+            productId: lineItem.productId,
+            status: 'skipped',
+            reason: 'Not a workshop product'
+          });
+          continue;
+        }
 
         // Fetch workshop guidelines and metadata
         const guidelines = await withBackoff(() => 
