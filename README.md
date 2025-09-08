@@ -1,6 +1,12 @@
-# Katie Ann Clay Mailer
+# Webflow Email Automation
 
-A transactional email service that automatically sends workshop orientation emails when customers purchase workshops from a Webflow store.
+A production-ready transactional email service that automatically sends workshop orientation emails when customers purchase workshops from a Webflow store. This project demonstrates how to build a Webflow integration that can be transformed into a marketplace app.
+
+## 🚀 Current Status
+
+**Production Ready** - Successfully processing real orders and sending automated emails for Katie Ann Clay's workshop business.
+
+**Next Phase** - Being developed into a multi-tenant Webflow Marketplace integration for broader distribution.
 
 ## Overview
 
@@ -17,6 +23,7 @@ This service bridges Webflow e-commerce and Resend to create a seamless customer
 - **Frontend/Site**: Webflow (source of truth for workshop listings)
 - **Email**: Resend transactional email API
 - **Infrastructure**: Vercel environment variables and logging
+- **Database**: Currently single-tenant (being migrated to multi-tenant)
 
 ## Project Structure
 
@@ -30,7 +37,12 @@ This service bridges Webflow e-commerce and Resend to create a seamless customer
 │   ├── resend.js              # Resend API integration
 │   └── retry.js               # Retry logic with exponential backoff
 ├── docs/
-│   └── mailer-plans.md        # Detailed project plan
+│   ├── mailer-plans.md        # Original project plan
+│   ├── webflow-integration-gaps.md    # Integration analysis
+│   ├── implementation-roadmap.md      # Development roadmap
+│   └── immediate-technical-changes.md # Specific changes needed
+├── assets/
+│   └── katie-logo-square-white.jpg    # Email template assets
 ├── package.json
 ├── vercel.json
 └── env.example                # Environment variables template
@@ -129,10 +141,40 @@ All processing is logged to Vercel console. No PII is stored externally.
 - Content sanitization before email injection
 - No PII stored in external systems
 
+### Security Considerations for Public Repository
+
+The codebase is designed to be secure when properly configured with environment variables. Sensitive data is excluded via `.gitignore` and all configuration uses environment variables.
+
+## Webflow Marketplace Integration
+
+This project is being developed into a full Webflow Marketplace integration. See the documentation in the `docs/` folder for:
+
+- **Integration Analysis** - Complete gap analysis and requirements
+- **Implementation Roadmap** - 12-week development plan
+- **Technical Changes** - Specific code modifications needed
+
+### Key Features for Marketplace Version
+
+- **Multi-tenant architecture** with OAuth 2.0 authentication
+- **Customer dashboard** for configuration and management
+- **Email template editor** with live preview
+- **Analytics dashboard** with usage tracking
+- **Billing integration** with Stripe
+- **Multi-site support** per customer
+
 ## Future Enhancements
 
+### Current Version
 - iCal attachment generation for workshop dates
 - Multi-language email templates
 - Per-workshop email templates
 - Admin UI for managing and retriggering emails
 - Email analytics and delivery tracking
+
+### Marketplace Version
+- **OAuth 2.0 integration** with Webflow
+- **Customer onboarding** flow
+- **Template marketplace** with pre-built designs
+- **Advanced analytics** and reporting
+- **Webhook management** interface
+- **Team collaboration** features

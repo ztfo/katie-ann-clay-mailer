@@ -19,6 +19,14 @@ logs/
 logs
 *.log
 
+# Docs
+docs/
+
+# Sensitive data - DO NOT COMMIT
+*.json
+!package*.json
+!tsconfig*.json
+
 # Runtime data
 pids
 *.pid
