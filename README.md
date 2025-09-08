@@ -1,10 +1,10 @@
 # Webflow Email Automation
 
-A production-ready transactional email service that automatically sends workshop orientation emails when customers purchase workshops from a Webflow store. This project demonstrates how to build a Webflow integration that can be transformed into a marketplace app.
+A transactional email service that automatically sends workshop orientation emails when customers purchase workshops from a Webflow store. Made this for my wife's business because Webflow doesn't have custom transaction emails.
 
 ## 🚀 Current Status
 
-**Production Ready** - Successfully processing real orders and sending automated emails for Katie Ann Clay's workshop business.
+**Live** - Successfully processing real orders and sending automated emails for Katie Ann Clay's workshop business.
 
 **Next Phase** - Being developed into a multi-tenant Webflow Marketplace integration for broader distribution.
 
@@ -114,67 +114,3 @@ npm run deploy
    - URL: `https://your-domain.vercel.app/api/webflow/order`
    - Events: Order created/updated
 
-## Development
-
-### Testing
-
-Test the webhook locally using a tool like ngrok or by deploying to a staging environment.
-
-### Email Templates
-
-The service includes a built-in HTML email template that automatically formats workshop information. You can also use Resend's template system for more advanced customization.
-
-### Logs
-
-All processing is logged to Vercel console. No PII is stored externally.
-
-### Error Handling
-
-- Retry logic with exponential backoff for API failures
-- Always returns 200 to Webflow to prevent retry storms
-- Comprehensive error logging
-
-## Security
-
-- All tokens stored in Vercel environment variables
-- Webhook signature verification (when configured)
-- Content sanitization before email injection
-- No PII stored in external systems
-
-### Security Considerations for Public Repository
-
-The codebase is designed to be secure when properly configured with environment variables. Sensitive data is excluded via `.gitignore` and all configuration uses environment variables.
-
-## Webflow Marketplace Integration
-
-This project is being developed into a full Webflow Marketplace integration. See the documentation in the `docs/` folder for:
-
-- **Integration Analysis** - Complete gap analysis and requirements
-- **Implementation Roadmap** - 12-week development plan
-- **Technical Changes** - Specific code modifications needed
-
-### Key Features for Marketplace Version
-
-- **Multi-tenant architecture** with OAuth 2.0 authentication
-- **Customer dashboard** for configuration and management
-- **Email template editor** with live preview
-- **Analytics dashboard** with usage tracking
-- **Billing integration** with Stripe
-- **Multi-site support** per customer
-
-## Future Enhancements
-
-### Current Version
-- iCal attachment generation for workshop dates
-- Multi-language email templates
-- Per-workshop email templates
-- Admin UI for managing and retriggering emails
-- Email analytics and delivery tracking
-
-### Marketplace Version
-- **OAuth 2.0 integration** with Webflow
-- **Customer onboarding** flow
-- **Template marketplace** with pre-built designs
-- **Advanced analytics** and reporting
-- **Webhook management** interface
-- **Team collaboration** features
