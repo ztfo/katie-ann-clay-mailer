@@ -11,41 +11,137 @@ const { sendWorkshopEmail } = require('../../lib/resend.js');
 const { withBackoff } = require('../../lib/retry.js');
 const crypto = require('crypto');
 
+// In-memory store for idempotency (in production, use Redis or database)
+const processedOrders = new Map();
+const MAX_CACHE_SIZE = 1000; // Prevent memory leaks
+
+/**
+ * Verify webhook signature to ensure request is from Webflow
+ * @param {Object} payload - Request body
+ * @param {string} signature - X-Webflow-Signature header
+ * @param {string} secret - Webhook secret from environment
+ * @returns {boolean} True if signature is valid
+ */
+function verifyWebhookSignature(payload, signature, secret) {
+  if (!signature || !secret) {
+    console.warn('Missing webhook signature or secret');
+    return false;
+  }
+  
+  try {
+    const expectedSignature = crypto
+      .createHmac('sha256', secret)
+      .update(JSON.stringify(payload))
+      .digest('hex');
+      
+    return crypto.timingSafeEqual(
+      Buffer.from(signature, 'hex'),
+      Buffer.from(expectedSignature, 'hex')
+    );
+  } catch (error) {
+    console.error('Error verifying webhook signature:', error);
+    return false;
+  }
+}
+
+/**
+ * Validate required environment variables
+ * @throws {Error} If any required variables are missing
+ */
+function validateEnvironment() {
+  const required = ['WEBFLOW_SITE_ID', 'WEBFLOW_API_TOKEN', 'RESEND_API_KEY', 'RESEND_FROM_EMAIL'];
+  const missing = required.filter(key => !process.env[key]);
+  if (missing.length > 0) {
+    throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+  }
+}
+
+/**
+ * Validate webhook payload structure
+ * @param {Object} payload - Webhook payload
+ * @returns {Object} Validated payload with customerEmail and lineItems
+ * @throws {Error} If payload is invalid
+ */
+function validateWebhookPayload(payload) {
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Invalid payload format');
+  }
+  
+  const orderData = payload.payload || payload;
+  
+  // Check for customer email
+  const customerEmail = orderData.customer?.email || orderData.customerInfo?.email;
+  if (!customerEmail || !customerEmail.includes('@')) {
+    throw new Error('Invalid or missing customer email');
+  }
+  
+  // Check for line items
+  const lineItems = orderData.lineItems || orderData.purchasedItems || [];
+  if (!Array.isArray(lineItems) || lineItems.length === 0) {
+    throw new Error('No items in order');
+  }
+  
+  return { customerEmail, lineItems, orderData };
+}
+
+/**
+ * Check if an order has already been processed (idempotency)
+ * @param {string} idempotencyKey - Unique key for the order
+ * @returns {boolean} True if already processed
+ */
+function isAlreadyProcessed(idempotencyKey) {
+  return processedOrders.has(idempotencyKey);
+}
+
+/**
+ * Mark an order as processed (idempotency)
+ * @param {string} idempotencyKey - Unique key for the order
+ * @param {Object} result - Processing result to store
+ */
+function markAsProcessed(idempotencyKey, result) {
+  // Prevent memory leaks by limiting cache size
+  if (processedOrders.size >= MAX_CACHE_SIZE) {
+    // Remove oldest entries (simple FIFO)
+    const firstKey = processedOrders.keys().next().value;
+    processedOrders.delete(firstKey);
+  }
+  
+  processedOrders.set(idempotencyKey, {
+    processedAt: new Date().toISOString(),
+    result: result
+  });
+}
+
 module.exports = async function handler(req, res) {
+  // Set security headers
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '1; mode=block');
+  res.setHeader('Content-Type', 'application/json');
+
   // Only allow POST requests
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    // TODO: Add webhook signature verification
-    // const signature = req.headers['x-webflow-signature'];
-    // if (!verifyWebhookSignature(req.body, signature)) {
-    //   return res.status(401).json({ error: 'Invalid signature' });
-    // }
+    // Validate environment variables
+    validateEnvironment();
 
-    const order = req.body;
+    // Verify webhook signature for security
+    const signature = req.headers['x-webflow-signature'];
+    const secret = process.env.WEBFLOW_WEBHOOK_SECRET;
     
-    // Process webhook payload
-
-    // Handle Webflow's actual payload structure
-    // Webflow sends: { triggerType: "ecomm_new_order", payload: { ... } }
-    const orderData = order.payload || order;
-    
-    // Validate required order data - check multiple possible structures
-    const customerEmail = orderData.customer?.email || orderData.customerInfo?.email;
-    const lineItems = orderData.lineItems || orderData.purchasedItems || orderData.items || [];
-    
-    if (!customerEmail || !lineItems.length) {
-      console.error('Invalid order payload:', { 
-        hasEmail: !!customerEmail, 
-        hasLineItems: !!lineItems.length,
-        payloadKeys: Object.keys(order),
-        customerKeys: orderData.customer ? Object.keys(orderData.customer) : 'no customer',
-        customerInfoKeys: orderData.customerInfo ? Object.keys(orderData.customerInfo) : 'no customerInfo'
+    if (!verifyWebhookSignature(req.body, signature, secret)) {
+      console.warn('Invalid webhook signature received', {
+        ip: req.headers['x-forwarded-for'] || req.connection.remoteAddress,
+        userAgent: req.headers['user-agent']
       });
-      return res.status(400).json({ error: 'Invalid order payload' });
+      return res.status(401).json({ error: 'Invalid signature' });
     }
+
+    // Validate and parse webhook payload
+    const { customerEmail, lineItems, orderData } = validateWebhookPayload(req.body);
 
     const orderId = orderData.orderId || orderData.id;
     
@@ -62,11 +158,16 @@ module.exports = async function handler(req, res) {
           .update(`${orderId}-${customerEmail}-${lineItem.productId}`)
           .digest('hex');
 
-        // TODO: Check if already processed (implement idempotency)
-        // if (await isAlreadyProcessed(idempotencyKey)) {
-        //   console.log(`Order ${orderId} already processed, skipping`);
-        //   continue;
-        // }
+        // Check if already processed (idempotency)
+        if (isAlreadyProcessed(idempotencyKey)) {
+          console.log(`Order ${orderId} already processed, skipping`);
+          results.push({
+            productId: lineItem.productId,
+            status: 'skipped',
+            reason: 'Already processed'
+          });
+          continue;
+        }
 
         // First, check if this is a workshop product
         const productResponse = await withBackoff(() => 
@@ -124,15 +225,16 @@ module.exports = async function handler(req, res) {
           })
         );
 
-        // TODO: Mark as processed (implement idempotency)
-        // await markAsProcessed(idempotencyKey);
-
-        results.push({
+        // Mark as processed (idempotency)
+        const result = {
           productId: lineItem.productId,
           status: 'success',
           workshopName: workshopData.name,
           emailSent: true
-        });
+        };
+        
+        markAsProcessed(idempotencyKey, result);
+        results.push(result);
 
         console.log(`Successfully sent workshop email for ${workshopData.name}`);
 
@@ -158,10 +260,14 @@ module.exports = async function handler(req, res) {
   } catch (error) {
     console.error('Webhook processing error:', error);
     
-    // Return 200 to prevent retry storms
+    // Don't expose internal error details to public
+    const isValidationError = error.message.includes('Invalid') || error.message.includes('Missing');
+    const errorMessage = isValidationError ? error.message : 'Internal processing error';
+    
+    // Return 200 to prevent retry storms from Webflow
     res.status(200).json({
       success: false,
-      error: 'Internal processing error',
+      error: errorMessage,
       timestamp: new Date().toISOString()
     });
   }

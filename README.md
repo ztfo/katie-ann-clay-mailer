@@ -61,6 +61,7 @@ cp env.example .env
 Required variables:
 - `WEBFLOW_SITE_ID` - Your Webflow site ID
 - `WEBFLOW_API_TOKEN` - Webflow API token
+- `WEBFLOW_WEBHOOK_SECRET` - Secret for webhook signature verification
 - `RESEND_API_KEY` - Resend API key
 - `RESEND_FROM_EMAIL` - Verified sender email address
 
@@ -113,4 +114,50 @@ npm run deploy
 2. Configure webhook to point to your Vercel API:
    - URL: `https://your-domain.vercel.app/api/webflow/order`
    - Events: Order created/updated
+   - **Important**: Set the webhook secret in your Webflow settings and use the same value for `WEBFLOW_WEBHOOK_SECRET`
+
+## Security Features
+
+- **Webhook signature verification** - Validates requests are from Webflow
+- **Environment variable validation** - Ensures all required config is present
+- **Input validation** - Validates webhook payload structure
+- **Idempotency protection** - Prevents duplicate email processing
+- **Security headers** - XSS protection, content type validation
+- **Error sanitization** - Doesn't expose internal errors to public
+- All tokens stored in Vercel environment variables
+- No PII stored in external systems
+
+## Webflow Marketplace Integration
+
+This project is being developed into a full Webflow Marketplace integration. See the documentation in the `docs/` folder for:
+
+- **Integration Analysis** - Complete gap analysis and requirements
+- **Implementation Roadmap** - 12-week development plan
+- **Technical Changes** - Specific code modifications needed
+
+### Key Features for Marketplace Version
+
+- **Multi-tenant architecture** with OAuth 2.0 authentication
+- **Customer dashboard** for configuration and management
+- **Email template editor** with live preview
+- **Analytics dashboard** with usage tracking
+- **Billing integration** with Stripe
+- **Multi-site support** per customer
+
+## Future Enhancements
+
+### Current Version
+- iCal attachment generation for workshop dates
+- Multi-language email templates
+- Per-workshop email templates
+- Admin UI for managing and retriggering emails
+- Email analytics and delivery tracking
+
+### Marketplace Version
+- **OAuth 2.0 integration** with Webflow
+- **Customer onboarding** flow
+- **Template marketplace** with pre-built designs
+- **Advanced analytics** and reporting
+- **Webhook management** interface
+- **Team collaboration** features
 
