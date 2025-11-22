@@ -1,21 +1,35 @@
-# Webflow Email Automation
+# Katie Ann Clay Mailer
 
-A transactional email service that automatically sends workshop orientation emails when customers purchase workshops from a Webflow store. Made this for my wife's business because Webflow doesn't have custom transaction emails.
+A transactional email service that automatically sends workshop orientation emails and gift card delivery emails when customers purchase from a Webflow store. Made this for my wife's business because Webflow doesn't have custom transaction emails.
 
 ## 🚀 Current Status
 
-**Live & Production Ready** - Successfully processing real orders and sending automated emails for Katie Ann Clay's workshop business.
+**Live & Production Ready** - Successfully processing real orders and sending automated emails for Katie Ann Clay's workshop and gift card business.
+
+**Features**:
+- ✅ Workshop orientation emails (existing)
+- ✅ Gift card code delivery emails (new)
+- ✅ Automatic code assignment from Supabase
+- ✅ CSV bulk import for gift card codes
+- ✅ Multi-denomination gift card support ($25, $50, $75, $105, $210)
 
 **Next Phase** - Being developed into a multi-tenant Webflow Marketplace integration for broader distribution.
 
 ## Overview
 
-This service bridges Webflow e-commerce and Resend to create a seamless customer experience:
+This service bridges Webflow e-commerce, Supabase, and Resend to create a seamless customer experience:
 
+### Workshop Orders
 1. **Receives** Webflow order webhooks when customers purchase workshops
 2. **Fetches** workshop details from Webflow (product custom fields or CMS collections)
 3. **Sends** workshop orientation emails via Resend transactional email API
-4. **Logs** all activities for monitoring (no PII stored externally)
+
+### Gift Card Orders
+1. **Detects** gift card purchases via product category (gift-cards)
+2. **Retrieves** unused discount codes from Supabase by denomination
+3. **Assigns** codes to orders and tracks lifecycle (unused → assigned → sent)
+4. **Sends** gift card delivery emails with unique discount codes via Resend
+5. **Logs** all activities for monitoring (codes logged with last 4 chars only)
 
 ## Tech Stack
 

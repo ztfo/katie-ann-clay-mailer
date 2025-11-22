@@ -1,11 +1,13 @@
 /**
  * Webflow Order Webhook Handler
- * Processes workshop purchases and sends orientation emails
+ * Processes workshop purchases and gift card purchases
+ * Sends orientation emails and gift card emails
  */
 
-const { resolveGuidelines, isWorkshopProduct } = require('../../lib/webflow.js');
-const { sendWorkshopEmail } = require('../../lib/resend.js');
+const { resolveGuidelines, isWorkshopProduct, isGiftCardProduct } = require('../../lib/webflow.js');
+const { sendWorkshopEmail, sendGiftCardEmail } = require('../../lib/resend.js');
 const { withBackoff } = require('../../lib/retry.js');
+const { getUnusedGiftCardCodes, assignGiftCardCode, markGiftCardSent, getGiftCardProduct } = require('../../lib/supabase.js');
 const crypto = require('crypto');
 
 const processedOrders = new Map();
@@ -254,16 +256,139 @@ module.exports = async function handler(req, res) {
           });
         }
         
-        if (!isWorkshopProduct(productResponse.product)) {
+        // Check if product is a workshop
+        const isWorkshop = isWorkshopProduct(productResponse.product);
+        const isGiftCard = isGiftCardProduct(productResponse.product);
+        
+        if (!isWorkshop && !isGiftCard) {
           if (isDebugMode) {
-            console.log(`[${requestId}] Product ${lineItem.productId} is not a workshop, skipping email`);
+            console.log(`[${requestId}] Product ${lineItem.productId} is neither a workshop nor a gift card, skipping`);
           }
           results.push({
             productId: lineItem.productId,
             status: 'skipped',
-            reason: 'Not a workshop product'
+            reason: 'Not a workshop or gift card product'
           });
           continue;
+        }
+
+        // Process gift card
+        if (isGiftCard) {
+          try {
+            if (isDebugMode) {
+              console.log(`[${requestId}] Processing gift card product`, {
+                productId: lineItem.productId,
+                quantity: lineItem.quantity
+              });
+            }
+
+            // Get gift card product mapping
+            const giftCardProduct = await getGiftCardProduct(lineItem.productId);
+            
+            if (!giftCardProduct) {
+              console.error(`[${requestId}] No gift card product mapping found for product ${lineItem.productId}`);
+              results.push({
+                productId: lineItem.productId,
+                status: 'error',
+                error: 'Gift card product not configured in database'
+              });
+              continue;
+            }
+
+            const amountCents = giftCardProduct.amount_cents;
+            const amountDisplay = `$${(amountCents / 100).toFixed(2)}`;
+            
+            // Process each quantity unit
+            for (let i = 0; i < lineItem.quantity; i++) {
+              if (isDebugMode) {
+                console.log(`[${requestId}] Processing gift card ${i + 1}/${lineItem.quantity}`);
+              }
+
+              // Get unused code
+              const unusedCodes = await withBackoff(() => 
+                getUnusedGiftCardCodes({ amountCents, limit: 1 })
+              );
+
+              if (!unusedCodes || unusedCodes.length === 0) {
+                console.error(`[${requestId}] No unused gift card codes available for ${amountDisplay}`);
+                results.push({
+                  productId: lineItem.productId,
+                  status: 'error',
+                  error: `No unused gift card codes available for ${amountDisplay}`,
+                  quantity: i + 1
+                });
+                // Alert: Consider sending an internal notification email here
+                continue;
+              }
+
+              const giftCardCode = unusedCodes[0];
+
+              // Assign code to order
+              await withBackoff(() => 
+                assignGiftCardCode({
+                  codeId: giftCardCode.id,
+                  order: { orderId, id: orderId },
+                  purchaser: { email: customerEmail }
+                })
+              );
+
+              if (isDebugMode) {
+                console.log(`[${requestId}] Assigned gift card code ...${giftCardCode.code.slice(-4)} to order`);
+              }
+
+              // Send gift card email
+              await withBackoff(() => 
+                sendGiftCardEmail({
+                  to: customerEmail,
+                  recipientName: orderData.customer?.name || orderData.customer?.firstName,
+                  amountDisplay,
+                  code: giftCardCode.code,
+                  message: null,
+                  shopUrl: 'https://www.katienannclay.com/shop'
+                })
+              );
+
+              if (isDebugMode) {
+                console.log(`[${requestId}] Gift card email sent successfully`);
+              }
+
+              // Mark as sent
+              await withBackoff(() => 
+                markGiftCardSent({ codeId: giftCardCode.id })
+              );
+
+              console.log(`Successfully sent gift card ${amountDisplay} (code: ...${giftCardCode.code.slice(-4)})`);
+            }
+
+            const result = {
+              productId: lineItem.productId,
+              status: 'success',
+              type: 'gift_card',
+              amount: amountDisplay,
+              quantity: lineItem.quantity,
+              emailsSent: lineItem.quantity
+            };
+            
+            markAsProcessed(idempotencyKey, result);
+            results.push(result);
+            continue;
+
+          } catch (error) {
+            console.error(`[${requestId}] Error processing gift card:`, {
+              error: error.message,
+              stack: error.stack,
+              productId: lineItem.productId,
+              orderId
+            });
+            results.push({
+              productId: lineItem.productId,
+              status: 'error',
+              type: 'gift_card',
+              error: error.message
+            });
+            // Don't throw - allow other line items to process
+            continue;
+          }
         }
 
         if (isDebugMode) {

@@ -17,13 +17,15 @@
   "author": "Luis Palomares",
   "license": "MIT",
   "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
     "axios": "^1.6.0",
     "crypto": "^1.0.1",
+    "csv-parse": "^5.5.3",
     "dotenv": "^17.2.2",
     "resend": "^3.2.0"
   },
   "devDependencies": {
-    "vercel": "^47.0.5"
+    "vercel": "^32.0.1"
   },
   "engines": {
     "node": ">=18.0.0"
