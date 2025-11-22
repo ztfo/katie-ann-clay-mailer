@@ -1,16 +1,15 @@
 # Katie Ann Clay Mailer
 
-A transactional email service that automatically sends workshop orientation emails and gift card delivery emails when customers purchase from a Webflow store. Made this for my wife's business because Webflow doesn't have custom transaction emails.
+A transactional email service that automatically sends workshop orientation emails and gift card delivery emails when customers purchase from a Webflow store. Made this for my wife's business because Webflow doesn't have custom transaction emails or gift card support.
 
 ## 🚀 Current Status
 
-**Live & Production Ready** - Successfully processing real orders and sending automated emails for Katie Ann Clay's workshop and gift card business.
+**Live & Production Ready** - Successfully processing real orders and sending automated emails for Katie Ann Clay's workshop and gift cards.
 
 **Features**:
 - ✅ Workshop orientation emails (existing)
 - ✅ Gift card code delivery emails (new)
 - ✅ Automatic code assignment from Supabase
-- ✅ CSV bulk import for gift card codes
 - ✅ Multi-denomination gift card support ($25, $50, $75, $105, $210)
 
 **Next Phase** - Being developed into a multi-tenant Webflow Marketplace integration for broader distribution.
@@ -34,10 +33,11 @@ This service bridges Webflow e-commerce, Supabase, and Resend to create a seamle
 ## Tech Stack
 
 - **Service**: Vercel Serverless Functions (Node.js)
-- **Frontend/Site**: Webflow (source of truth for workshop listings)
+- **Frontend/Site**: Webflow (source of truth for workshop and gift card listings)
 - **Email**: Resend transactional email API
+- **Database**: Supabase PostgreSQL (gift card codes and product mappings)
 - **Infrastructure**: Vercel environment variables and logging
-- **Database**: Currently single-tenant (being migrated to multi-tenant)
+- **Security**: Row Level Security (RLS), webhook signature verification, secure logging
 
 ## Project Structure
 
@@ -45,57 +45,32 @@ This service bridges Webflow e-commerce, Supabase, and Resend to create a seamle
 ├── api/
 │   ├── health.js              # Health check endpoint
 │   └── webflow/
-│       └── order.js           # Webflow order webhook handler
+│       └── order.js           # Webflow order webhook handler (workshops + gift cards)
 ├── lib/
-│   ├── webflow.js             # Webflow API integration
-│   ├── resend.js              # Resend API integration
+│   ├── webflow.js             # Webflow API integration (product detection)
+│   ├── resend.js              # Resend API integration (workshop + gift card emails)
+│   ├── supabase.js            # Supabase client (gift card code management)
 │   └── retry.js               # Retry logic with exponential backoff
+├── migrations/
+│   ├── 001_gift_card_codes.sql         # Gift card codes table
+│   ├── 002_gift_card_products.sql      # Product mapping table
+│   ├── 003_security_policies.sql       # RLS policies and validation
+│   └── 004_populate_gift_card_products.sql  # Product mappings
 ├── docs/
-│   ├── webflow-integration-gaps.md    # Integration analysis
-│   ├── implementation-roadmap.md      # Development roadmap
+│   ├── gift-card-setup-guide.md        # Complete gift card setup guide
+│   ├── gift-cards.md                   # Original gift card plan
+│   ├── security-checklist.md           # Security best practices
+│   ├── security-advisors-addressed.md  # Supabase security fixes
+│   ├── rls-policy-explanation.md       # RLS policy details
+│   ├── supabase-api-key-setup.md       # Supabase API key guide
+│   ├── webflow-integration-gaps.md     # Integration analysis
+│   ├── implementation-roadmap.md       # Development roadmap
 │   └── immediate-technical-changes.md # Specific changes needed
 ├── assets/
 │   └── katie-logo-square-white.jpg    # Email template assets
 ├── package.json
 ├── vercel.json
 └── env.example                # Environment variables template
-```
-
-## Setup
-
-### 1. Environment Variables
-
-Copy `env.example` to `.env` and fill in your credentials:
-
-```bash
-cp env.example .env
-```
-
-Required variables:
-- `WEBFLOW_SITE_ID` - Your Webflow site ID
-- `WEBFLOW_API_TOKEN` - Webflow API token
-- `WEBFLOW_WEBHOOK_SECRET` - Secret for webhook signature verification
-- `RESEND_API_KEY` - Resend API key
-- `RESEND_FROM_EMAIL` - Verified sender email address
-
-### 2. Install Dependencies
-
-```bash
-npm install
-```
-
-### 3. Local Development
-
-```bash
-npm run dev
-```
-
-This starts the Vercel development server at `http://localhost:3000`
-
-### 4. Deploy to Vercel
-
-```bash
-npm run deploy
 ```
 
 ## API Endpoints
@@ -107,4 +82,23 @@ npm run deploy
 ### Webflow Webhook
 - **POST** `/api/webflow/order`
 - Receives order webhooks from Webflow e-commerce
-- Processes workshop purchases and sends orientation emails via Resend
+- **Workshop Orders**: Fetches workshop details and sends orientation emails via Resend
+- **Gift Card Orders**: Retrieves unused codes from Supabase, assigns to order, and sends gift card delivery emails via Resend
+- Handles both product types in a single order gracefully
+- Includes webhook signature verification for security
+
+## Features
+
+### Workshop Emails
+- Automatic detection of workshop products (by category or product type)
+- Fetches workshop guidelines from Webflow CMS or product custom fields
+- Sends branded orientation emails with workshop details
+- Includes order information and customer details
+
+### Gift Card System
+- **Automatic Detection**: Detects gift card products by category ID
+- **Code Management**: Retrieves unused discount codes from Supabase by denomination
+- **Lifecycle Tracking**: Tracks code status (unused → assigned → sent)
+- **Multi-Denomination**: Supports $25, $50, $75, $105, $210 gift cards
+- **Branded Emails**: Beautiful gift card delivery emails with redemption instructions
+- **Security**: Row Level Security (RLS), secure logging, webhook verification
