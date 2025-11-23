@@ -7,7 +7,7 @@
 const { resolveGuidelines, isWorkshopProduct, isGiftCardProduct } = require('../../lib/webflow.js');
 const { sendWorkshopEmail, sendGiftCardEmail } = require('../../lib/resend.js');
 const { withBackoff } = require('../../lib/retry.js');
-const { getUnusedGiftCardCodes, assignGiftCardCode, markGiftCardSent, getGiftCardProduct } = require('../../lib/supabase.js');
+const { assignUnusedGiftCardCodeAtomically, markGiftCardSent, getGiftCardProduct } = require('../../lib/supabase.js');
 const crypto = require('crypto');
 
 const processedOrders = new Map();
@@ -326,38 +326,32 @@ module.exports = async function handler(req, res) {
             for (let i = 0; i < quantity; i++) {
               console.log(`[${requestId}] Processing gift card ${i + 1}/${quantity} for ${amountDisplay}`);
 
-              // Get unused code
-              console.log(`[${requestId}] Fetching unused gift card code for ${amountDisplay}...`);
-              const unusedCodes = await withBackoff(() => 
-                getUnusedGiftCardCodes({ amountCents, limit: 1 })
-              );
-
-              if (!unusedCodes || unusedCodes.length === 0) {
-                console.error(`[${requestId}] ❌ No unused gift card codes available for ${amountDisplay}`);
-                results.push({
-                  productId: lineItem.productId,
-                  status: 'error',
-                  error: `No unused gift card codes available for ${amountDisplay}`,
-                  quantity: i + 1
-                });
-                // Alert: Consider sending an internal notification email here
-                continue;
+              // Atomically assign unused code (prevents race conditions)
+              console.log(`[${requestId}] Atomically assigning unused gift card code for ${amountDisplay}...`);
+              let giftCardCode;
+              try {
+                giftCardCode = await withBackoff(() => 
+                  assignUnusedGiftCardCodeAtomically({
+                    amountCents,
+                    order: { orderId, id: orderId },
+                    purchaser: { email: customerEmail }
+                  })
+                );
+                console.log(`[${requestId}] ✅ Atomically assigned code: ...${giftCardCode.code.slice(-4)} (ID: ${giftCardCode.id})`);
+              } catch (error) {
+                if (error.message && error.message.includes('No unused gift card codes available')) {
+                  console.error(`[${requestId}] ❌ No unused gift card codes available for ${amountDisplay}`);
+                  results.push({
+                    productId: lineItem.productId,
+                    status: 'error',
+                    error: `No unused gift card codes available for ${amountDisplay}`,
+                    quantity: i + 1
+                  });
+                  // Alert: Consider sending an internal notification email here
+                  continue;
+                }
+                throw error;
               }
-
-              const giftCardCode = unusedCodes[0];
-              console.log(`[${requestId}] ✅ Found unused code: ...${giftCardCode.code.slice(-4)} (ID: ${giftCardCode.id})`);
-
-              // Assign code to order
-              console.log(`[${requestId}] Assigning code to order ${orderId}...`);
-              await withBackoff(() => 
-                assignGiftCardCode({
-                  codeId: giftCardCode.id,
-                  order: { orderId, id: orderId },
-                  purchaser: { email: customerEmail }
-                })
-              );
-
-              console.log(`[${requestId}] ✅ Assigned gift card code ...${giftCardCode.code.slice(-4)} to order ${orderId}`);
 
               // Send gift card email
               console.log(`[${requestId}] 📧 Sending gift card email to ${customerEmail} for ${amountDisplay}...`);
