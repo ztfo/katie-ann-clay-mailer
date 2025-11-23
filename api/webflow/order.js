@@ -368,7 +368,7 @@ module.exports = async function handler(req, res) {
                   amountDisplay,
                   code: giftCardCode.code,
                   message: null,
-                  shopUrl: 'https://www.katienannclay.com/shop'
+                  shopUrl: process.env.SHOP_URL || 'https://www.katieannclay.com/shop-filters'
                 })
               );
 
