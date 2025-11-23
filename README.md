@@ -7,8 +7,8 @@ A transactional email service that automatically sends workshop orientation emai
 **Live & Production Ready** - Successfully processing real orders and sending automated emails for Katie Ann Clay's workshop and gift cards.
 
 **Features**:
-- ✅ Workshop orientation emails (existing)
-- ✅ Gift card code delivery emails (new)
+- ✅ Workshop orientation emails 
+- ✅ Gift card code delivery emails 
 - ✅ Automatic code assignment from Supabase
 - ✅ Multi-denomination gift card support ($25, $50, $75, $105, $210)
 
