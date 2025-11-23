@@ -50,6 +50,12 @@ function validateEnvironment() {
   if (missing.length > 0) {
     throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
   }
+  
+  // Check Supabase variables if gift card processing might be needed
+  // (We don't fail here since gift cards are optional, but we'll log a warning)
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SECRET_KEY) {
+    console.warn('Supabase environment variables not set. Gift card processing will fail if gift cards are purchased.');
+  }
 }
 
 /**
@@ -260,10 +266,16 @@ module.exports = async function handler(req, res) {
         const isWorkshop = isWorkshopProduct(productResponse.product);
         const isGiftCard = isGiftCardProduct(productResponse.product);
         
+        console.log(`[${requestId}] Product check:`, {
+          productId: lineItem.productId,
+          productName: productResponse.product?.name,
+          isWorkshop,
+          isGiftCard,
+          categories: productResponse.product?.fieldData?.category
+        });
+        
         if (!isWorkshop && !isGiftCard) {
-          if (isDebugMode) {
-            console.log(`[${requestId}] Product ${lineItem.productId} is neither a workshop nor a gift card, skipping`);
-          }
+          console.log(`[${requestId}] ⏭️  Skipping product - not a workshop or gift card`);
           results.push({
             productId: lineItem.productId,
             status: 'skipped',
@@ -274,19 +286,19 @@ module.exports = async function handler(req, res) {
 
         // Process gift card
         if (isGiftCard) {
+          console.log(`[${requestId}] 🎁 Gift card detected! Processing gift card product`, {
+            productId: lineItem.productId,
+            productName: productResponse.product?.name,
+            quantity: lineItem.quantity
+          });
+          
           try {
-            if (isDebugMode) {
-              console.log(`[${requestId}] Processing gift card product`, {
-                productId: lineItem.productId,
-                quantity: lineItem.quantity
-              });
-            }
-
             // Get gift card product mapping
+            console.log(`[${requestId}] Looking up gift card product mapping for ${lineItem.productId}`);
             const giftCardProduct = await getGiftCardProduct(lineItem.productId);
             
             if (!giftCardProduct) {
-              console.error(`[${requestId}] No gift card product mapping found for product ${lineItem.productId}`);
+              console.error(`[${requestId}] ❌ No gift card product mapping found for product ${lineItem.productId}`);
               results.push({
                 productId: lineItem.productId,
                 status: 'error',
@@ -298,19 +310,20 @@ module.exports = async function handler(req, res) {
             const amountCents = giftCardProduct.amount_cents;
             const amountDisplay = `$${(amountCents / 100).toFixed(2)}`;
             
+            console.log(`[${requestId}] ✅ Found gift card mapping: ${amountDisplay} (${amountCents} cents)`);
+            
             // Process each quantity unit
             for (let i = 0; i < lineItem.quantity; i++) {
-              if (isDebugMode) {
-                console.log(`[${requestId}] Processing gift card ${i + 1}/${lineItem.quantity}`);
-              }
+              console.log(`[${requestId}] Processing gift card ${i + 1}/${lineItem.quantity} for ${amountDisplay}`);
 
               // Get unused code
+              console.log(`[${requestId}] Fetching unused gift card code for ${amountDisplay}...`);
               const unusedCodes = await withBackoff(() => 
                 getUnusedGiftCardCodes({ amountCents, limit: 1 })
               );
 
               if (!unusedCodes || unusedCodes.length === 0) {
-                console.error(`[${requestId}] No unused gift card codes available for ${amountDisplay}`);
+                console.error(`[${requestId}] ❌ No unused gift card codes available for ${amountDisplay}`);
                 results.push({
                   productId: lineItem.productId,
                   status: 'error',
@@ -322,8 +335,10 @@ module.exports = async function handler(req, res) {
               }
 
               const giftCardCode = unusedCodes[0];
+              console.log(`[${requestId}] ✅ Found unused code: ...${giftCardCode.code.slice(-4)} (ID: ${giftCardCode.id})`);
 
               // Assign code to order
+              console.log(`[${requestId}] Assigning code to order ${orderId}...`);
               await withBackoff(() => 
                 assignGiftCardCode({
                   codeId: giftCardCode.id,
@@ -332,12 +347,11 @@ module.exports = async function handler(req, res) {
                 })
               );
 
-              if (isDebugMode) {
-                console.log(`[${requestId}] Assigned gift card code ...${giftCardCode.code.slice(-4)} to order`);
-              }
+              console.log(`[${requestId}] ✅ Assigned gift card code ...${giftCardCode.code.slice(-4)} to order ${orderId}`);
 
               // Send gift card email
-              await withBackoff(() => 
+              console.log(`[${requestId}] 📧 Sending gift card email to ${customerEmail} for ${amountDisplay}...`);
+              const emailResult = await withBackoff(() => 
                 sendGiftCardEmail({
                   to: customerEmail,
                   recipientName: orderData.customer?.name || orderData.customer?.firstName,
@@ -348,16 +362,19 @@ module.exports = async function handler(req, res) {
                 })
               );
 
-              if (isDebugMode) {
-                console.log(`[${requestId}] Gift card email sent successfully`);
-              }
+              console.log(`[${requestId}] ✅ Gift card email sent successfully`, {
+                email: customerEmail,
+                amount: amountDisplay,
+                resendId: emailResult?.id || 'unknown'
+              });
 
               // Mark as sent
+              console.log(`[${requestId}] Marking code as sent in database...`);
               await withBackoff(() => 
                 markGiftCardSent({ codeId: giftCardCode.id })
               );
 
-              console.log(`Successfully sent gift card ${amountDisplay} (code: ...${giftCardCode.code.slice(-4)})`);
+              console.log(`[${requestId}] ✅ Successfully completed gift card ${amountDisplay} (code: ...${giftCardCode.code.slice(-4)})`);
             }
 
             const result = {
