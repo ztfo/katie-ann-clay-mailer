@@ -68,14 +68,14 @@ function validateWebhookPayload(payload) {
   
   const orderData = payload.payload || payload;
   
-  // Check for customer email
-  const customerEmail = orderData.customer?.email || orderData.customerInfo?.email;
+  // Check for customer email - Webflow uses customerInfo (not customer)
+  const customerEmail = orderData.customerInfo?.email || orderData.customer?.email;
   if (!customerEmail || !customerEmail.includes('@')) {
     throw new Error('Invalid or missing customer email');
   }
   
-  // Check for line items
-  const lineItems = orderData.lineItems || orderData.purchasedItems || [];
+  // Check for line items - Webflow uses purchasedItems (not lineItems)
+  const lineItems = orderData.purchasedItems || orderData.lineItems || [];
   if (!Array.isArray(lineItems) || lineItems.length === 0) {
     throw new Error('No items in order');
   }
@@ -198,6 +198,7 @@ module.exports = async function handler(req, res) {
       });
     }
 
+    // Webflow uses orderId (not id)
     const orderId = orderData.orderId || orderData.id;
     
     if (isDebugMode) {
@@ -205,8 +206,8 @@ module.exports = async function handler(req, res) {
         customerEmail: customerEmail?.substring(0, 3) + '***@' + customerEmail?.split('@')[1],
         lineItems: lineItems.map(item => ({
           productId: item.productId,
-          name: item.name,
-          quantity: item.quantity
+          name: item.productName || item.name,
+          quantity: item.count || item.quantity || 1
         }))
       });
     }
@@ -217,8 +218,8 @@ module.exports = async function handler(req, res) {
       if (isDebugMode) {
         console.log(`[${requestId}] Processing line item`, {
           productId: lineItem.productId,
-          name: lineItem.name,
-          quantity: lineItem.quantity
+          name: lineItem.productName || lineItem.name,
+          quantity: lineItem.count || lineItem.quantity || 1
         });
       }
       
@@ -286,10 +287,18 @@ module.exports = async function handler(req, res) {
 
         // Process gift card
         if (isGiftCard) {
+          // Log full lineItem structure to debug
+          console.log(`[${requestId}] 🎁 Gift card detected! Full lineItem structure:`, JSON.stringify(lineItem, null, 2));
+          
+          // Get quantity - Webflow uses 'count' field (not 'quantity')
+          const quantity = lineItem.count || lineItem.quantity || lineItem.qty || 1;
+          
           console.log(`[${requestId}] 🎁 Gift card detected! Processing gift card product`, {
             productId: lineItem.productId,
             productName: productResponse.product?.name,
-            quantity: lineItem.quantity
+            quantity: quantity,
+            rawCount: lineItem.count,
+            rawQuantity: lineItem.quantity
           });
           
           try {
@@ -311,10 +320,11 @@ module.exports = async function handler(req, res) {
             const amountDisplay = `$${(amountCents / 100).toFixed(2)}`;
             
             console.log(`[${requestId}] ✅ Found gift card mapping: ${amountDisplay} (${amountCents} cents)`);
+            console.log(`[${requestId}] Processing ${quantity} gift card(s)...`);
             
             // Process each quantity unit
-            for (let i = 0; i < lineItem.quantity; i++) {
-              console.log(`[${requestId}] Processing gift card ${i + 1}/${lineItem.quantity} for ${amountDisplay}`);
+            for (let i = 0; i < quantity; i++) {
+              console.log(`[${requestId}] Processing gift card ${i + 1}/${quantity} for ${amountDisplay}`);
 
               // Get unused code
               console.log(`[${requestId}] Fetching unused gift card code for ${amountDisplay}...`);
@@ -354,7 +364,7 @@ module.exports = async function handler(req, res) {
               const emailResult = await withBackoff(() => 
                 sendGiftCardEmail({
                   to: customerEmail,
-                  recipientName: orderData.customer?.name || orderData.customer?.firstName,
+                  recipientName: orderData.customerInfo?.fullName || orderData.customer?.name || orderData.customer?.firstName,
                   amountDisplay,
                   code: giftCardCode.code,
                   message: null,
@@ -382,8 +392,8 @@ module.exports = async function handler(req, res) {
               status: 'success',
               type: 'gift_card',
               amount: amountDisplay,
-              quantity: lineItem.quantity,
-              emailsSent: lineItem.quantity
+              quantity: quantity,
+              emailsSent: quantity
             };
             
             markAsProcessed(idempotencyKey, result);
@@ -439,7 +449,7 @@ module.exports = async function handler(req, res) {
         }
 
         const workshopData = {
-          name: guidelines.name || lineItem.name,
+          name: guidelines.name || lineItem.productName || lineItem.name,
           date: guidelines.date || 'TBD',
           location: guidelines.location || 'TBD',
           guidelinesHtml: guidelines.guidelinesHtml || 'Guidelines coming soon...',
@@ -460,7 +470,7 @@ module.exports = async function handler(req, res) {
         }
 
         const customerData = {
-          customerName: orderData.customer?.name || orderData.customer?.firstName || 'Workshop Participant',
+          customerName: orderData.customerInfo?.fullName || orderData.customer?.name || orderData.customer?.firstName || 'Workshop Participant',
           orderId: orderId
         };
 
