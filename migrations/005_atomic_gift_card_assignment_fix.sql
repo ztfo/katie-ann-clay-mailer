@@ -1,6 +1,5 @@
--- Atomic Gift Card Assignment Function
--- Prevents race conditions by using SELECT FOR UPDATE SKIP LOCKED
--- This ensures only one request can assign a specific code at a time
+-- Fix for ambiguous column reference in assign_unused_gift_card_code function
+-- Run this if you get "column reference 'id' is ambiguous" error
 
 CREATE OR REPLACE FUNCTION assign_unused_gift_card_code(
   p_amount_cents INTEGER,
@@ -27,7 +26,7 @@ RETURNS TABLE (
   updated_at TIMESTAMPTZ
 ) AS $$
 DECLARE
-  v_code_id UUID;
+  v_code_id UUID;  
   v_assigned_at TIMESTAMPTZ;
 BEGIN
   -- Get current timestamp
@@ -38,11 +37,11 @@ BEGIN
   -- 1. Only one transaction can lock a row at a time
   -- 2. If a row is locked, skip it and try the next one
   -- 3. This prevents race conditions completely
-  SELECT gcc.id INTO v_code_id
-  FROM gift_card_codes gcc
-  WHERE gcc.status = 'unused'
-    AND gcc.amount_cents = p_amount_cents
-  ORDER BY gcc.created_at ASC  -- FIFO: assign oldest codes first
+  SELECT gift_card_codes.id INTO v_code_id
+  FROM gift_card_codes
+  WHERE gift_card_codes.status = 'unused'
+    AND gift_card_codes.amount_cents = p_amount_cents
+  ORDER BY gift_card_codes.created_at ASC  -- FIFO: assign oldest codes first
   LIMIT 1
   FOR UPDATE SKIP LOCKED;
 
@@ -62,34 +61,27 @@ BEGIN
     message = p_message,
     assigned_at = v_assigned_at,
     updated_at = NOW()
-  WHERE id = v_code_id;
+  WHERE gift_card_codes.id = v_code_id;
 
-  -- Return the assigned code
+  -- Return the assigned code (using table name to avoid ambiguity)
   RETURN QUERY
   SELECT
-    gcc.id,
-    gcc.code,
-    gcc.amount_cents,
-    gcc.currency,
-    gcc.status,
-    gcc.webflow_order_id,
-    gcc.purchaser_email,
-    gcc.recipient_email,
-    gcc.recipient_name,
-    gcc.message,
-    gcc.assigned_at,
-    gcc.sent_at,
-    gcc.created_at,
-    gcc.updated_at
-  FROM gift_card_codes gcc
-  WHERE gcc.id = v_code_id;
+    gift_card_codes.id,
+    gift_card_codes.code,
+    gift_card_codes.amount_cents,
+    gift_card_codes.currency,
+    gift_card_codes.status,
+    gift_card_codes.webflow_order_id,
+    gift_card_codes.purchaser_email,
+    gift_card_codes.recipient_email,
+    gift_card_codes.recipient_name,
+    gift_card_codes.message,
+    gift_card_codes.assigned_at,
+    gift_card_codes.sent_at,
+    gift_card_codes.created_at,
+    gift_card_codes.updated_at
+  FROM gift_card_codes
+  WHERE gift_card_codes.id = v_code_id;
 END;
 $$ LANGUAGE plpgsql;
-
--- Grant execute permission to service_role (Supabase handles this automatically, but explicit is better)
--- Note: service_role bypasses RLS, so this function will work with SUPABASE_SECRET_KEY
-
--- Add comment for documentation
-COMMENT ON FUNCTION assign_unused_gift_card_code IS 
-  'Atomically assigns an unused gift card code to an order. Uses SELECT FOR UPDATE SKIP LOCKED to prevent race conditions. Returns the assigned code or raises an exception if no codes are available.';
 
