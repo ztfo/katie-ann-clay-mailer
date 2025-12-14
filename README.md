@@ -56,16 +56,6 @@ This service bridges Webflow e-commerce, Supabase, and Resend to create a seamle
 │   ├── 002_gift_card_products.sql      # Product mapping table
 │   ├── 003_security_policies.sql       # RLS policies and validation
 │   └── 004_populate_gift_card_products.sql  # Product mappings
-├── docs/
-│   ├── gift-card-setup-guide.md        # Complete gift card setup guide
-│   ├── gift-cards.md                   # Original gift card plan
-│   ├── security-checklist.md           # Security best practices
-│   ├── security-advisors-addressed.md  # Supabase security fixes
-│   ├── rls-policy-explanation.md       # RLS policy details
-│   ├── supabase-api-key-setup.md       # Supabase API key guide
-│   ├── webflow-integration-gaps.md     # Integration analysis
-│   ├── implementation-roadmap.md       # Development roadmap
-│   └── immediate-technical-changes.md # Specific changes needed
 ├── assets/
 │   └── katie-logo-square-white.jpg    # Email template assets
 ├── package.json
