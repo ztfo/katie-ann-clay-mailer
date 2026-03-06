@@ -4,10 +4,10 @@
  * Sends orientation emails and gift card emails
  */
 
-const { resolveGuidelines, isWorkshopProduct, isGiftCardProduct } = require('../../lib/webflow.js');
-const { sendWorkshopEmail, sendGiftCardEmail } = require('../../lib/resend.js');
+const { resolveGuidelines, isWorkshopProduct, isRetreatProduct, isGiftCardProduct } = require('../../lib/webflow.js');
+const { sendWorkshopEmail, sendRetreatEmail, sendGiftCardEmail } = require('../../lib/resend.js');
 const { withBackoff } = require('../../lib/retry.js');
-const { assignUnusedGiftCardCodeAtomically, markGiftCardSent, getGiftCardProduct } = require('../../lib/supabase.js');
+const { assignUnusedGiftCardCodeAtomically, markGiftCardSent, getGiftCardProduct, getGiftCardRecipientInfo, consumeGiftCardRecipientInfo } = require('../../lib/supabase.js');
 const crypto = require('crypto');
 
 const processedOrders = new Map();
@@ -55,6 +55,10 @@ function validateEnvironment() {
   // (We don't fail here since gift cards are optional, but we'll log a warning)
   if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SECRET_KEY) {
     console.warn('Supabase environment variables not set. Gift card processing will fail if gift cards are purchased.');
+  }
+
+  if (!process.env.WEBFLOW_RETREAT_PASSES_CATEGORY_ID || !process.env.WEBFLOW_RETREAT_ACCOMMODATIONS_CATEGORY_ID) {
+    console.warn('Retreat category environment variables not set. Retreat product detection will be disabled.');
   }
 }
 
@@ -263,25 +267,81 @@ module.exports = async function handler(req, res) {
           });
         }
         
-        // Check if product is a workshop
-        const isWorkshop = isWorkshopProduct(productResponse.product);
+        // Check product type — retreat must be checked before workshop
+        // because the legacy early bird retreat product has Service type
+        const isRetreat = isRetreatProduct(productResponse.product);
+        const isWorkshop = !isRetreat && isWorkshopProduct(productResponse.product);
         const isGiftCard = isGiftCardProduct(productResponse.product);
-        
+
         console.log(`[${requestId}] Product check:`, {
           productId: lineItem.productId,
           productName: productResponse.product?.name,
+          isRetreat,
           isWorkshop,
           isGiftCard,
           categories: productResponse.product?.fieldData?.category
         });
-        
-        if (!isWorkshop && !isGiftCard) {
-          console.log(`[${requestId}] ⏭️  Skipping product - not a workshop or gift card`);
+
+        if (!isRetreat && !isWorkshop && !isGiftCard) {
+          console.log(`[${requestId}] ⏭️  Skipping product - not a retreat, workshop, or gift card`);
           results.push({
             productId: lineItem.productId,
             status: 'skipped',
-            reason: 'Not a workshop or gift card product'
+            reason: 'Not a retreat, workshop, or gift card product'
           });
+          continue;
+        }
+
+        // Process retreat (pass or accommodation)
+        if (isRetreat) {
+          console.log(`[${requestId}] 🏕️ Retreat product detected, fetching details...`);
+
+          const guidelines = await withBackoff(() =>
+            resolveGuidelines(process.env.WEBFLOW_SITE_ID, {
+              productId: lineItem.productId
+            })
+          );
+
+          if (!guidelines) {
+            console.error(`[${requestId}] No content found for retreat product ${lineItem.productId}`);
+            results.push({
+              productId: lineItem.productId,
+              status: 'error',
+              error: 'No content found for retreat product'
+            });
+            continue;
+          }
+
+          const retreatData = {
+            name: guidelines.name || lineItem.productName || lineItem.name,
+            guidelinesHtml: guidelines.guidelinesHtml || 'Retreat details coming soon...'
+          };
+
+          const customerData = {
+            customerName: orderData.customerInfo?.fullName || orderData.customer?.name || orderData.customer?.firstName || 'Retreat Guest',
+            orderId: orderId
+          };
+
+          await withBackoff(() =>
+            sendRetreatEmail({
+              email: customerEmail,
+              retreatData,
+              customerData
+            })
+          );
+
+          const result = {
+            productId: lineItem.productId,
+            status: 'success',
+            type: 'retreat',
+            retreatName: retreatData.name,
+            emailSent: true
+          };
+
+          markAsProcessed(idempotencyKey, result);
+          results.push(result);
+
+          console.log(`Successfully sent retreat email for ${retreatData.name}`);
           continue;
         }
 
@@ -321,7 +381,62 @@ module.exports = async function handler(req, res) {
             
             console.log(`[${requestId}] ✅ Found gift card mapping: ${amountDisplay} (${amountCents} cents)`);
             console.log(`[${requestId}] Processing ${quantity} gift card(s)...`);
-            
+
+            // Look up recipient info from database once (stored via product page form)
+            // This is the primary method since Webflow checkout doesn't support custom fields
+            let storedRecipientInfo = null;
+            try {
+              storedRecipientInfo = await getGiftCardRecipientInfo({
+                purchaserEmail: customerEmail,
+                productId: lineItem.productId
+              });
+              if (storedRecipientInfo) {
+                console.log(`[${requestId}] ✅ Found stored recipient info for purchaser ${customerEmail}`);
+              }
+            } catch (error) {
+              console.warn(`[${requestId}] ⚠️ Error looking up recipient info:`, error.message);
+              // Continue processing even if lookup fails
+            }
+
+            // Extract gift message and recipient info from order
+            // Priority: stored recipient info > order customFields > order notes
+            const giftMessage =
+              storedRecipientInfo?.message ||
+              orderData.customFields?.giftMessage ||
+              orderData.customFields?.['gift-message'] ||
+              orderData.customFields?.['gift_message'] ||
+              orderData.notes?.giftMessage ||
+              (typeof orderData.notes === 'string' ? orderData.notes : null) ||
+              lineItem.customFields?.giftMessage ||
+              lineItem.customFields?.['gift-message'] ||
+              orderData.metadata?.giftMessage ||
+              null;
+
+            const recipientName =
+              storedRecipientInfo?.recipient_name ||
+              orderData.customFields?.recipientName ||
+              orderData.customFields?.['recipient-name'] ||
+              orderData.customFields?.['recipient_name'] ||
+              orderData.customFields?.recipient ||
+              null;
+
+            const recipientEmail =
+              storedRecipientInfo?.recipient_email ||
+              orderData.customFields?.recipientEmail ||
+              orderData.customFields?.['recipient-email'] ||
+              orderData.customFields?.['recipient_email'] ||
+              null;
+
+            if (giftMessage) {
+              console.log(`[${requestId}] 📝 Gift message found: ${giftMessage.substring(0, 50)}...`);
+            }
+            if (recipientName) {
+              console.log(`[${requestId}] 👤 Recipient name found: ${recipientName}`);
+            }
+            if (recipientEmail) {
+              console.log(`[${requestId}] 📧 Recipient email found: ${recipientEmail}`);
+            }
+
             // Process each quantity unit
             for (let i = 0; i < quantity; i++) {
               console.log(`[${requestId}] Processing gift card ${i + 1}/${quantity} for ${amountDisplay}`);
@@ -334,7 +449,12 @@ module.exports = async function handler(req, res) {
                   assignUnusedGiftCardCodeAtomically({
                     amountCents,
                     order: { orderId, id: orderId },
-                    purchaser: { email: customerEmail }
+                    purchaser: { email: customerEmail },
+                    recipient: giftMessage || recipientName || recipientEmail ? {
+                      email: recipientEmail,
+                      name: recipientName,
+                      message: giftMessage
+                    } : null
                   })
                 );
                 console.log(`[${requestId}] ✅ Atomically assigned code: ...${giftCardCode.code.slice(-4)} (ID: ${giftCardCode.id})`);
@@ -353,24 +473,62 @@ module.exports = async function handler(req, res) {
                 throw error;
               }
 
-              // Send gift card email
-              console.log(`[${requestId}] 📧 Sending gift card email to ${customerEmail} for ${amountDisplay}...`);
-              const emailResult = await withBackoff(() => 
+              // Send gift card email to purchaser
+              // Use message from database (if stored) or from order data
+              const emailMessage = giftCardCode.message || giftMessage;
+              const emailRecipientName = giftCardCode.recipient_name || recipientName || orderData.customerInfo?.fullName || orderData.customer?.name || orderData.customer?.firstName;
+              
+              console.log(`[${requestId}] 📧 Sending gift card email to purchaser ${customerEmail} for ${amountDisplay}...`);
+              if (emailMessage) {
+                console.log(`[${requestId}] 📝 Including gift message in email`);
+              }
+              const purchaserEmailResult = await withBackoff(() => 
                 sendGiftCardEmail({
                   to: customerEmail,
-                  recipientName: orderData.customerInfo?.fullName || orderData.customer?.name || orderData.customer?.firstName,
+                  recipientName: emailRecipientName,
                   amountDisplay,
                   code: giftCardCode.code,
-                  message: null,
-                  shopUrl: process.env.SHOP_URL || 'https://www.katieannclay.com/shop-filters'
+                  message: emailMessage,
+                  shopUrl: process.env.SHOP_URL || 'https://www.katieannclay.com/shop-filters',
+                  isRecipient: false // This is the purchaser email
                 })
               );
 
-              console.log(`[${requestId}] ✅ Gift card email sent successfully`, {
+              console.log(`[${requestId}] ✅ Gift card email sent to purchaser successfully`, {
                 email: customerEmail,
                 amount: amountDisplay,
-                resendId: emailResult?.id || 'unknown'
+                resendId: purchaserEmailResult?.id || 'unknown'
               });
+
+              // Also send email to recipient if recipient email is provided
+              if (recipientEmail && recipientEmail !== customerEmail) {
+                console.log(`[${requestId}] 📧 Sending gift card email to recipient ${recipientEmail} for ${amountDisplay}...`);
+                try {
+                  const recipientEmailResult = await withBackoff(() => 
+                    sendGiftCardEmail({
+                      to: recipientEmail,
+                      recipientName: recipientName || 'Friend',
+                      amountDisplay,
+                      code: giftCardCode.code,
+                      message: emailMessage,
+                      shopUrl: process.env.SHOP_URL || 'https://www.katieannclay.com/shop-filters',
+                      isRecipient: true // This is the recipient email
+                    })
+                  );
+
+                  console.log(`[${requestId}] ✅ Gift card email sent to recipient successfully`, {
+                    email: recipientEmail,
+                    amount: amountDisplay,
+                    resendId: recipientEmailResult?.id || 'unknown'
+                  });
+                } catch (recipientError) {
+                  console.error(`[${requestId}] ❌ Failed to send email to recipient ${recipientEmail}:`, recipientError);
+                  // Don't fail the entire process if recipient email fails
+                  // Purchaser email was already sent successfully
+                }
+              } else if (recipientEmail === customerEmail) {
+                console.log(`[${requestId}] ℹ️ Recipient email same as purchaser, skipping duplicate email`);
+              }
 
               // Mark as sent
               console.log(`[${requestId}] Marking code as sent in database...`);
@@ -379,6 +537,16 @@ module.exports = async function handler(req, res) {
               );
 
               console.log(`[${requestId}] ✅ Successfully completed gift card ${amountDisplay} (code: ...${giftCardCode.code.slice(-4)})`);
+            }
+
+            // Consume recipient info so it's not reused for future orders
+            if (storedRecipientInfo?.id) {
+              try {
+                await consumeGiftCardRecipientInfo(storedRecipientInfo.id);
+                console.log(`[${requestId}] 🗑️ Consumed recipient info record ${storedRecipientInfo.id}`);
+              } catch (error) {
+                console.warn(`[${requestId}] ⚠️ Failed to consume recipient info:`, error.message);
+              }
             }
 
             const result = {
