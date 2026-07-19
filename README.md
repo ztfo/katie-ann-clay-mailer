@@ -12,7 +12,7 @@ A transactional email service that automatically sends workshop orientation emai
 - ✅ Gift card code delivery emails 
 - ✅ Automatic code assignment from Supabase
 - ✅ Multi-denomination gift card support ($25, $50, $75, $105, $210)
-- ✅ Internal email dashboard — view, preview, resend & send test emails (Supabase Auth)
+- ✅ Internal email dashboard: view, preview, resend & send test emails (Supabase Auth)
 - ✅ Permanent email archive, independent of Resend's retention window
 
 **Next Phase** - Being developed into a multi-tenant Webflow Marketplace integration for broader distribution.
@@ -34,7 +34,7 @@ This service bridges Webflow e-commerce, Supabase, and Resend to create a seamle
 5. **Logs** all activities for monitoring (codes logged with last 4 chars only)
 
 ### Email Dashboard
-An internal, password-protected dashboard (served from the same Vercel deployment) so my wife can see every email the service has sent — without logging into Resend or losing older emails to its retention limit.
+An internal, password-protected dashboard (served from the same Vercel deployment) so my wife can see every email the service has sent, without logging into Resend or losing older emails to its retention limit.
 1. **Records** every sent email (workshop, retreat, gift card) with its rendered HTML in Supabase
 2. **Displays** a searchable, filterable report with at-a-glance counts (24h / 7d / 30d / total)
 3. **Previews** the actual rendered email in-app, **resends** any email, and **sends test** samples
@@ -109,12 +109,12 @@ An internal, password-protected dashboard (served from the same Vercel deploymen
 
 ### Dashboard (authenticated)
 All require a valid Supabase session (Bearer token); access is limited to provisioned users.
-- **GET** `/api/config` — public Supabase URL + publishable key for the browser client
-- **GET** `/api/auth/me` — current signed-in user
-- **GET** `/api/dashboard/emails` — filterable, paginated report of sent emails + summary counts
-- **GET** `/api/dashboard/email-html` — rendered HTML of a single email (for preview)
-- **POST** `/api/dashboard/resend` — resend a previously sent email
-- **POST** `/api/dashboard/test-email` — send a `[TEST]` sample of any email type
+- **GET** `/api/config`: public Supabase URL + publishable key for the browser client
+- **GET** `/api/auth/me`: current signed-in user
+- **GET** `/api/dashboard/emails`: filterable, paginated report of sent emails + summary counts
+- **GET** `/api/dashboard/email-html`: rendered HTML of a single email (for preview)
+- **POST** `/api/dashboard/resend`: resend a previously sent email
+- **POST** `/api/dashboard/test-email`: send a `[TEST]` sample of any email type
 
 ## Features
 
