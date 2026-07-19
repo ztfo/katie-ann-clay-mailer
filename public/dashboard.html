@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Email Dashboard — Katie Ann Clay</title>
+  <style>
+    :root {
+      --brand: #274d5a;
+      --brand-dark: #1d3a44;
+      --accent: #a8d4e0;
+      --bg: #f5f5f5;
+      --card: #ffffff;
+      --text: #333;
+      --muted: #6b7680;
+      --border: #e4e8ea;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0; background: var(--bg); color: var(--text); line-height: 1.5;
+    }
+    header {
+      background: var(--brand); color: #fff; padding: 18px 24px;
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+    }
+    header h1 {
+      margin: 0; font-size: 18px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;
+    }
+    header .user { font-size: 14px; color: var(--accent); display: flex; align-items: center; gap: 14px; }
+    header a { color: #fff; text-decoration: none; font-weight: 600; font-size: 13px; text-transform: uppercase; letter-spacing: .5px; }
+    header a:hover { text-decoration: underline; }
+    main { max-width: 1100px; margin: 0 auto; padding: 24px; }
+
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-bottom: 24px; }
+    .card {
+      background: var(--card); padding: 18px 20px; border-radius: 8px; border: 1px solid var(--border);
+    }
+    .card .label { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 6px; }
+    .card .value { font-size: 28px; font-weight: 700; color: var(--brand); }
+    .card .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    .toolbar {
+      display: flex; gap: 12px; flex-wrap: wrap; align-items: center; margin-bottom: 16px;
+      background: var(--card); padding: 14px 16px; border-radius: 8px; border: 1px solid var(--border);
+    }
+    .toolbar input, .toolbar select {
+      padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit;
+    }
+    .toolbar input[type="search"] { flex: 1; min-width: 200px; }
+    .toolbar button {
+      padding: 8px 16px; background: var(--brand); color: #fff; border: none; border-radius: 6px;
+      font-weight: 600; cursor: pointer; font-size: 14px;
+    }
+    .toolbar button:hover { background: var(--brand-dark); }
+    .toolbar button.secondary { background: #fff; color: var(--brand); border: 1px solid var(--brand); }
+    .toolbar button.secondary:hover { background: var(--brand); color: #fff; }
+    .toolbar .spacer { flex: 1; }
+
+    .table-wrap { background: var(--card); border: 1px solid var(--border); border-radius: 8px; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th, td { text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    th { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); background: #fafbfb; position: sticky; top: 0; }
+    td.wrap { white-space: normal; max-width: 300px; }
+    td.actions { text-align: right; }
+    tr:last-child td { border-bottom: none; }
+
+    .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
+    .badge.gift_card { background: #eaf5f9; color: #1d5b70; }
+    .badge.workshop { background: #eef1ea; color: #3f5b2f; }
+    .badge.retreat { background: #f3ecf5; color: #5b2f6b; }
+    .badge.status-sent { background: #e7f4ea; color: #226b39; }
+    .badge.status-resent { background: #fff3cd; color: #856404; }
+    .badge.status-failed { background: #fbe9e7; color: #b23b2e; }
+
+    .resend-btn {
+      padding: 5px 12px; background: #fff; color: var(--brand); border: 1px solid var(--brand);
+      border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 12px;
+    }
+    .resend-btn:hover { background: var(--brand); color: #fff; }
+    .resend-btn:disabled { opacity: .5; cursor: default; }
+    .link-btn { background: none; border: none; color: var(--brand); font-weight: 600; cursor: pointer; font-size: 12px; padding: 5px 8px; }
+    .link-btn:hover { text-decoration: underline; }
+
+    .muted { color: var(--muted); }
+    .empty, .loading { text-align: center; padding: 40px; color: var(--muted); }
+
+    .pager { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; font-size: 14px; color: var(--muted); }
+    .pager button {
+      padding: 7px 14px; border: 1px solid var(--border); background: #fff; border-radius: 6px; cursor: pointer; font-weight: 600;
+    }
+    .pager button:disabled { opacity: .4; cursor: default; }
+
+    #toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(20px);
+      background: var(--brand); color: #fff; padding: 12px 20px; border-radius: 8px; font-size: 14px;
+      opacity: 0; pointer-events: none; transition: all .25s ease; max-width: 90vw; z-index: 30;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    #toast.error { background: #b23b2e; }
+
+    /* Gate the UI until auth is resolved, to avoid a flash of the dashboard. */
+    #app { display: none; }
+    #splash {
+      position: fixed; inset: 0; z-index: 10;
+      display: flex; align-items: center; justify-content: center; background: var(--bg);
+    }
+    .spinner {
+      width: 40px; height: 40px; border: 4px solid var(--border);
+      border-top-color: var(--brand); border-radius: 50%; animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Login view */
+    #login { position: fixed; inset: 0; z-index: 10; display: none; align-items: center; justify-content: center; background: var(--bg); padding: 20px; }
+    .login-card { background: var(--card); border: 1px solid var(--border); border-top: 4px solid var(--brand); border-radius: 8px; padding: 32px; width: 100%; max-width: 360px; }
+    .login-card h1 { margin: 0; color: var(--brand); font-size: 22px; text-transform: uppercase; letter-spacing: 1px; }
+    .login-sub { margin: 6px 0 22px; color: var(--muted); font-size: 14px; }
+    .login-card label { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 14px; }
+    .login-card input { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 15px; font-family: inherit; }
+    .login-card button { width: 100%; padding: 11px; background: var(--brand); color: #fff; border: none; border-radius: 6px; font-weight: 600; font-size: 15px; cursor: pointer; margin-top: 4px; }
+    .login-card button:hover { background: var(--brand-dark); }
+    .login-card button:disabled { opacity: .6; cursor: default; }
+    .login-error { color: #b23b2e; font-size: 13px; margin-top: 12px; min-height: 16px; }
+
+    /* Modal system */
+    #modal-overlay { position: fixed; inset: 0; z-index: 20; display: none; align-items: center; justify-content: center; background: rgba(20,30,35,.55); padding: 20px; }
+    #modal-overlay.show { display: flex; }
+    .modal { background: #fff; border-radius: 10px; width: 100%; max-width: 440px; box-shadow: 0 20px 60px rgba(0,0,0,.3); overflow: hidden; }
+    .modal.modal-lg { max-width: 760px; }
+    .modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 18px 22px; border-bottom: 1px solid var(--border); }
+    .modal-title { font-weight: 600; color: var(--brand); font-size: 16px; text-transform: uppercase; letter-spacing: .5px; }
+    .modal-sub { color: var(--muted); font-size: 13px; margin-top: 2px; word-break: break-all; }
+    .modal-close { background: none; border: none; font-size: 24px; line-height: 1; color: var(--muted); cursor: pointer; padding: 0 4px; }
+    .modal-body { padding: 22px; color: var(--text); font-size: 15px; }
+    .modal-body.preview-body { padding: 0; background: #f5f5f5; }
+    .preview-frame { width: 100%; height: 65vh; border: none; background: #fff; display: block; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 16px 22px; border-top: 1px solid var(--border); }
+    .btn-primary { padding: 9px 18px; background: var(--brand); color: #fff; border: none; border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 14px; }
+    .btn-primary:hover { background: var(--brand-dark); }
+    .btn-primary:disabled { opacity: .6; cursor: default; }
+    .btn-secondary { padding: 9px 18px; background: #fff; color: var(--muted); border: 1px solid var(--border); border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 14px; }
+    .field { display: block; font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 16px; }
+    .field select, .field input { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 15px; font-family: inherit; text-transform: none; letter-spacing: normal; color: var(--text); }
+    .modal-msg { min-height: 16px; font-size: 13px; color: var(--muted); }
+    .modal-msg.error { color: #b23b2e; }
+  </style>
+</head>
+<body>
+  <div id="splash"><div class="spinner"></div></div>
+
+  <div id="login">
+    <form id="login-form" class="login-card">
+      <h1>Email Dashboard</h1>
+      <p class="login-sub">Sign in to continue</p>
+      <label>Email
+        <input type="email" id="login-email" autocomplete="username" required />
+      </label>
+      <label>Password
+        <input type="password" id="login-password" autocomplete="current-password" required />
+      </label>
+      <button type="submit" id="login-submit">Sign in</button>
+      <div id="login-error" class="login-error"></div>
+    </form>
+  </div>
+
+  <div id="app">
+  <header>
+    <h1>Email Dashboard</h1>
+    <div class="user">
+      <span id="user-email"></span>
+      <a href="#" id="logout">Log out</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="cards" id="cards"></div>
+
+    <div class="toolbar">
+      <input type="search" id="search" placeholder="Search by email or order ID…" />
+      <select id="type">
+        <option value="">All types</option>
+        <option value="gift_card">Gift card</option>
+        <option value="workshop">Workshop</option>
+        <option value="retreat">Retreat</option>
+      </select>
+      <select id="days">
+        <option value="">All time</option>
+        <option value="1">Last 24 hours</option>
+        <option value="7">Last 7 days</option>
+        <option value="30">Last 30 days</option>
+        <option value="90">Last 90 days</option>
+      </select>
+      <button id="refresh">Refresh</button>
+      <span class="spacer"></span>
+      <button id="test-email-btn" class="secondary">Send test email</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Sent</th>
+            <th>Type</th>
+            <th>To</th>
+            <th>Subject</th>
+            <th>Order</th>
+            <th>Amount</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="rows">
+          <tr><td colspan="8" class="loading">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="pager">
+      <span id="page-info"></span>
+      <span>
+        <button id="prev" disabled>‹ Prev</button>
+        <button id="next" disabled>Next ›</button>
+      </span>
+    </div>
+  </main>
+  </div>
+
+  <div id="toast"></div>
+  <div id="modal-overlay"><div id="modal-content"></div></div>
+
+  <script type="module">
+    import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+    const PAGE_SIZE = 50;
+    let offset = 0;
+    let total = 0;
+    let supabase = null;
+    let currentUserEmail = '';
+
+    const $ = (id) => document.getElementById(id);
+
+    function toast(msg, isError) {
+      const el = $('toast');
+      el.textContent = msg;
+      el.className = 'show' + (isError ? ' error' : '');
+      setTimeout(() => { el.className = ''; }, 3200);
+    }
+
+    function fmtDate(iso) {
+      if (!iso) return '—';
+      const d = new Date(iso);
+      return d.toLocaleString(undefined, { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+    }
+
+    function fmtAmount(cents) {
+      if (cents === null || cents === undefined) return '—';
+      return '$' + (Number(cents) / 100).toFixed(2);
+    }
+
+    function esc(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
+        { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+      ));
+    }
+
+    function typeLabel(t) {
+      return { gift_card: 'Gift card', workshop: 'Workshop', retreat: 'Retreat' }[t] || t;
+    }
+
+    // ---- Modal system --------------------------------------------------------
+    let modalOnClose = null;
+
+    function openModal(node, onClose) {
+      const c = $('modal-content');
+      c.innerHTML = '';
+      c.appendChild(node);
+      modalOnClose = onClose || null;
+      $('modal-overlay').classList.add('show');
+    }
+    function closeModal() {
+      $('modal-overlay').classList.remove('show');
+      $('modal-content').innerHTML = '';
+      modalOnClose = null;
+    }
+    function dismissModal() {
+      const cb = modalOnClose;
+      closeModal();
+      if (cb) cb();
+    }
+
+    function confirmModal(message, confirmLabel = 'Confirm') {
+      return new Promise((resolve) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'modal';
+        wrap.innerHTML = `
+          <div class="modal-body">${esc(message)}</div>
+          <div class="modal-actions">
+            <button class="btn-secondary" data-act="cancel">Cancel</button>
+            <button class="btn-primary" data-act="ok">${esc(confirmLabel)}</button>
+          </div>`;
+        wrap.querySelector('[data-act="cancel"]').addEventListener('click', () => { closeModal(); resolve(false); });
+        wrap.querySelector('[data-act="ok"]').addEventListener('click', () => { closeModal(); resolve(true); });
+        openModal(wrap, () => resolve(false));
+      });
+    }
+
+    function previewModal({ subject, to, html }) {
+      const wrap = document.createElement('div');
+      wrap.className = 'modal modal-lg';
+      const header = document.createElement('div');
+      header.className = 'modal-header';
+      header.innerHTML = `
+        <div>
+          <div class="modal-title">Email preview</div>
+          <div class="modal-sub">${esc(subject || '')}${to ? ' · To: ' + esc(to) : ''}</div>
+        </div>
+        <button class="modal-close" aria-label="Close">&times;</button>`;
+      const body = document.createElement('div');
+      body.className = 'modal-body preview-body';
+      const iframe = document.createElement('iframe');
+      iframe.className = 'preview-frame';
+      iframe.setAttribute('sandbox', ''); // render only, no scripts
+      iframe.srcdoc = html;
+      body.appendChild(iframe);
+      wrap.appendChild(header);
+      wrap.appendChild(body);
+      header.querySelector('.modal-close').addEventListener('click', closeModal);
+      openModal(wrap, null);
+    }
+
+    function testEmailModal() {
+      const wrap = document.createElement('div');
+      wrap.className = 'modal';
+      wrap.innerHTML = `
+        <div class="modal-header">
+          <div class="modal-title">Send a test email</div>
+          <button class="modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <label class="field">Email type
+            <select id="test-type">
+              <option value="gift_card">Gift card</option>
+              <option value="workshop">Workshop</option>
+              <option value="retreat">Retreat</option>
+            </select>
+          </label>
+          <label class="field">Send to
+            <input type="email" id="test-to" value="${esc(currentUserEmail)}" />
+          </label>
+          <div id="test-msg" class="modal-msg">A clearly-marked [TEST] sample email will be sent.</div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-secondary" data-act="cancel">Cancel</button>
+          <button class="btn-primary" id="test-send">Send test</button>
+        </div>`;
+      wrap.querySelector('.modal-close').addEventListener('click', closeModal);
+      wrap.querySelector('[data-act="cancel"]').addEventListener('click', closeModal);
+      wrap.querySelector('#test-send').addEventListener('click', async () => {
+        const type = wrap.querySelector('#test-type').value;
+        const to = wrap.querySelector('#test-to').value.trim();
+        const btn = wrap.querySelector('#test-send');
+        const msg = wrap.querySelector('#test-msg');
+        msg.className = 'modal-msg';
+        btn.disabled = true;
+        btn.textContent = 'Sending…';
+        try {
+          const res = await authedFetch('/api/dashboard/test-email', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type, to })
+          });
+          if (res.status === 401) { closeModal(); showLogin(); return; }
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Failed to send');
+          closeModal();
+          toast(`Test ${typeLabel(type).toLowerCase()} email sent to ${to}`);
+          resetAndLoad();
+        } catch (err) {
+          msg.textContent = err.message;
+          msg.className = 'modal-msg error';
+          btn.disabled = false;
+          btn.textContent = 'Send test';
+        }
+      });
+      openModal(wrap, null);
+    }
+
+    // ---- Auth-aware fetch ----------------------------------------------------
+    async function authedFetch(url, opts = {}) {
+      const { data } = await supabase.auth.getSession();
+      const token = data.session ? data.session.access_token : null;
+      const headers = Object.assign({}, opts.headers || {}, token ? { Authorization: 'Bearer ' + token } : {});
+      return fetch(url, Object.assign({}, opts, { headers }));
+    }
+
+    // ---- Views ---------------------------------------------------------------
+    function showLogin() {
+      $('splash').style.display = 'none';
+      $('app').style.display = 'none';
+      $('login').style.display = 'flex';
+    }
+    function showApp(email) {
+      currentUserEmail = email || '';
+      $('splash').style.display = 'none';
+      $('login').style.display = 'none';
+      $('app').style.display = 'block';
+      $('user-email').textContent = email;
+    }
+
+    // ---- Rendering -----------------------------------------------------------
+    function renderCards(s) {
+      $('cards').innerHTML = `
+        <div class="card"><div class="label">Last 24 hours</div><div class="value">${s.last24h}</div></div>
+        <div class="card"><div class="label">Last 7 days</div><div class="value">${s.last7d}</div></div>
+        <div class="card"><div class="label">Last 30 days</div><div class="value">${s.last30d}</div></div>
+        <div class="card"><div class="label">Total sent</div><div class="value">${s.total}</div>
+          <div class="sub">${s.byType.gift_card} gift · ${s.byType.workshop} workshop · ${s.byType.retreat} retreat</div></div>
+      `;
+    }
+
+    function renderRows(emails) {
+      if (!emails.length) {
+        $('rows').innerHTML = '<tr><td colspan="8" class="empty">No emails match these filters.</td></tr>';
+        return;
+      }
+      $('rows').innerHTML = emails.map((e) => {
+        const canView = e.has_html || e.resend_message_id;
+        return `
+        <tr>
+          <td>${fmtDate(e.created_at)}</td>
+          <td><span class="badge ${e.email_type}">${typeLabel(e.email_type)}</span></td>
+          <td>${esc(e.to_email)}${e.recipient_role ? ` <span class="muted">(${e.recipient_role})</span>` : ''}</td>
+          <td class="wrap">${esc(e.subject)}</td>
+          <td>${esc(e.webflow_order_id || '—')}</td>
+          <td>${fmtAmount(e.amount_cents)}</td>
+          <td><span class="badge status-${e.status}">${e.status}</span></td>
+          <td class="actions">
+            ${canView ? `<button class="link-btn view-btn" data-id="${e.id}">View</button>` : ''}
+            <button class="resend-btn" data-id="${e.id}" data-to="${esc(e.to_email)}">Resend</button>
+          </td>
+        </tr>`;
+      }).join('');
+
+      document.querySelectorAll('.view-btn').forEach((btn) => {
+        btn.addEventListener('click', () => viewEmail(btn.dataset.id));
+      });
+      document.querySelectorAll('.resend-btn').forEach((btn) => {
+        btn.addEventListener('click', () => resend(btn));
+      });
+    }
+
+    async function viewEmail(id) {
+      try {
+        const res = await authedFetch('/api/dashboard/email-html?id=' + encodeURIComponent(id));
+        if (res.status === 401) { showLogin(); return; }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'No preview available');
+        previewModal(data);
+      } catch (err) {
+        toast(err.message, true);
+      }
+    }
+
+    async function resend(btn) {
+      const id = btn.dataset.id;
+      const to = btn.dataset.to;
+      const ok = await confirmModal(`Resend this email to ${to}?`, 'Resend');
+      if (!ok) return;
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+      try {
+        const res = await authedFetch('/api/dashboard/resend', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        });
+        if (res.status === 401) { showLogin(); return; }
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Resend failed');
+        toast(`Resent to ${to}`);
+        load();
+      } catch (err) {
+        toast(err.message, true);
+        btn.disabled = false;
+        btn.textContent = 'Resend';
+      }
+    }
+
+    async function load() {
+      const params = new URLSearchParams();
+      const type = $('type').value;
+      const search = $('search').value.trim();
+      const days = $('days').value;
+      if (type) params.set('type', type);
+      if (search) params.set('search', search);
+      if (days) params.set('days', days);
+      params.set('limit', PAGE_SIZE);
+      params.set('offset', offset);
+
+      $('rows').innerHTML = '<tr><td colspan="8" class="loading">Loading…</td></tr>';
+
+      try {
+        const res = await authedFetch('/api/dashboard/emails?' + params.toString());
+        if (res.status === 401) { showLogin(); return; }
+        if (!res.ok) throw new Error('Failed to load');
+        const data = await res.json();
+        renderCards(data.summary);
+        renderRows(data.emails);
+        total = data.pagination.total;
+        updatePager();
+      } catch (err) {
+        $('rows').innerHTML = '<tr><td colspan="8" class="empty">Could not load emails.</td></tr>';
+        toast(err.message, true);
+      }
+    }
+
+    function updatePager() {
+      const start = total === 0 ? 0 : offset + 1;
+      const end = Math.min(offset + PAGE_SIZE, total);
+      $('page-info').textContent = `${start}–${end} of ${total}`;
+      $('prev').disabled = offset === 0;
+      $('next').disabled = end >= total;
+    }
+
+    function resetAndLoad() { offset = 0; load(); }
+
+    // ---- Login / logout ------------------------------------------------------
+    async function handleLogin(e) {
+      e.preventDefault();
+      const email = $('login-email').value.trim();
+      const password = $('login-password').value;
+      const btn = $('login-submit');
+      $('login-error').textContent = '';
+      btn.disabled = true;
+      btn.textContent = 'Signing in…';
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      btn.disabled = false;
+      btn.textContent = 'Sign in';
+      if (error) { $('login-error').textContent = error.message; return; }
+      showApp(data.user.email);
+      resetAndLoad();
+    }
+
+    async function handleLogout(e) {
+      if (e) e.preventDefault();
+      if (supabase) await supabase.auth.signOut();
+      $('login-password').value = '';
+      showLogin();
+    }
+
+    function wireHandlers() {
+      $('login-form').addEventListener('submit', handleLogin);
+      $('logout').addEventListener('click', handleLogout);
+      $('refresh').addEventListener('click', resetAndLoad);
+      $('test-email-btn').addEventListener('click', testEmailModal);
+      $('type').addEventListener('change', resetAndLoad);
+      $('days').addEventListener('change', resetAndLoad);
+      let searchTimer;
+      $('search').addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(resetAndLoad, 350);
+      });
+      $('prev').addEventListener('click', () => { offset = Math.max(0, offset - PAGE_SIZE); load(); });
+      $('next').addEventListener('click', () => { offset += PAGE_SIZE; load(); });
+
+      $('modal-overlay').addEventListener('click', (e) => {
+        if (e.target === $('modal-overlay')) dismissModal();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && $('modal-overlay').classList.contains('show')) dismissModal();
+      });
+    }
+
+    async function init() {
+      wireHandlers();
+
+      let cfg;
+      try {
+        const res = await fetch('/api/config');
+        if (!res.ok) throw new Error('config');
+        cfg = await res.json();
+      } catch {
+        $('splash').innerHTML = '<div style="max-width:360px;text-align:center;color:#b23b2e;padding:20px">' +
+          'Dashboard config is missing. Set <code>SUPABASE_URL</code> and <code>SUPABASE_PUBLISHABLE_KEY</code>.</div>';
+        return;
+      }
+
+      supabase = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, {
+        auth: { persistSession: true, autoRefreshToken: true }
+      });
+
+      const { data } = await supabase.auth.getSession();
+      if (data.session) {
+        showApp(data.session.user.email);
+        load();
+      } else {
+        showLogin();
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

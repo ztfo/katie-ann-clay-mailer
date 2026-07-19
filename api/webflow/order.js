@@ -5,9 +5,10 @@
  */
 
 const { resolveGuidelines, isWorkshopProduct, isRetreatProduct, isGiftCardProduct } = require('../../lib/webflow.js');
-const { sendWorkshopEmail, sendRetreatEmail, sendGiftCardEmail } = require('../../lib/resend.js');
+const { sendWorkshopEmail, sendRetreatEmail, sendGiftCardEmail, createWorkshopEmailTemplate, createRetreatEmailTemplate, createGiftCardEmailTemplate } = require('../../lib/resend.js');
 const { withBackoff } = require('../../lib/retry.js');
 const { assignUnusedGiftCardCodeAtomically, markGiftCardSent, getGiftCardProduct, getGiftCardRecipientInfo, consumeGiftCardRecipientInfo } = require('../../lib/supabase.js');
+const { logEmail, resendMessageId } = require('../../lib/emailLog.js');
 const crypto = require('crypto');
 
 const processedOrders = new Map();
@@ -322,13 +323,29 @@ module.exports = async function handler(req, res) {
             orderId: orderId
           };
 
-          await withBackoff(() =>
+          const retreatEmailResult = await withBackoff(() =>
             sendRetreatEmail({
               email: customerEmail,
               retreatData,
               customerData
             })
           );
+
+          await logEmail({
+            emailType: 'retreat',
+            toEmail: customerEmail,
+            subject: `Retreat Details: ${retreatData.name}`,
+            resendMessageId: resendMessageId(retreatEmailResult),
+            webflowOrderId: orderId,
+            productId: lineItem.productId,
+            html: createRetreatEmailTemplate(retreatData, customerData),
+            payload: {
+              productId: lineItem.productId,
+              orderId,
+              customerName: customerData.customerName,
+              name: retreatData.name
+            }
+          });
 
           const result = {
             productId: lineItem.productId,
@@ -500,6 +517,33 @@ module.exports = async function handler(req, res) {
                 resendId: purchaserEmailResult?.id || 'unknown'
               });
 
+              await logEmail({
+                emailType: 'gift_card',
+                toEmail: customerEmail,
+                recipientRole: 'purchaser',
+                subject: `Your ${amountDisplay} Gift Card from Katie Ann Clay`,
+                resendMessageId: resendMessageId(purchaserEmailResult),
+                webflowOrderId: orderId,
+                productId: lineItem.productId,
+                giftCardCodeId: giftCardCode.id,
+                amountCents,
+                html: createGiftCardEmailTemplate({
+                  recipientName: emailRecipientName || null,
+                  amountDisplay,
+                  code: giftCardCode.code,
+                  message: emailMessage || null,
+                  shopUrl: process.env.SHOP_URL || 'https://www.katieannclay.com/shop-filters',
+                  isRecipient: false
+                }),
+                payload: {
+                  code: giftCardCode.code,
+                  amountCents,
+                  recipientName: emailRecipientName || null,
+                  message: emailMessage || null,
+                  isRecipient: false
+                }
+              });
+
               // Also send email to recipient if recipient email is provided
               if (recipientEmail && recipientEmail !== customerEmail) {
                 console.log(`[${requestId}] 📧 Sending gift card email to recipient ${recipientEmail} for ${amountDisplay}...`);
@@ -520,6 +564,33 @@ module.exports = async function handler(req, res) {
                     email: recipientEmail,
                     amount: amountDisplay,
                     resendId: recipientEmailResult?.id || 'unknown'
+                  });
+
+                  await logEmail({
+                    emailType: 'gift_card',
+                    toEmail: recipientEmail,
+                    recipientRole: 'recipient',
+                    subject: `You've received a ${amountDisplay} Gift Card from Katie Ann Clay!`,
+                    resendMessageId: resendMessageId(recipientEmailResult),
+                    webflowOrderId: orderId,
+                    productId: lineItem.productId,
+                    giftCardCodeId: giftCardCode.id,
+                    amountCents,
+                    html: createGiftCardEmailTemplate({
+                      recipientName: recipientName || 'Friend',
+                      amountDisplay,
+                      code: giftCardCode.code,
+                      message: emailMessage || null,
+                      shopUrl: process.env.SHOP_URL || 'https://www.katieannclay.com/shop-filters',
+                      isRecipient: true
+                    }),
+                    payload: {
+                      code: giftCardCode.code,
+                      amountCents,
+                      recipientName: recipientName || 'Friend',
+                      message: emailMessage || null,
+                      isRecipient: true
+                    }
                   });
                 } catch (recipientError) {
                   console.error(`[${requestId}] ❌ Failed to send email to recipient ${recipientEmail}:`, recipientError);
@@ -651,7 +722,7 @@ module.exports = async function handler(req, res) {
           });
         }
         
-        await withBackoff(() => 
+        const workshopEmailResult = await withBackoff(() =>
           sendWorkshopEmail({
             email: customerEmail,
             workshopData,
@@ -659,7 +730,23 @@ module.exports = async function handler(req, res) {
             templateId: process.env.RESEND_TEMPLATE_ID
           })
         );
-        
+
+        await logEmail({
+          emailType: 'workshop',
+          toEmail: customerEmail,
+          subject: `Workshop Details: ${workshopData.name}`,
+          resendMessageId: resendMessageId(workshopEmailResult),
+          webflowOrderId: orderId,
+          productId: lineItem.productId,
+          html: createWorkshopEmailTemplate(workshopData, customerData),
+          payload: {
+            productId: lineItem.productId,
+            orderId,
+            customerName: customerData.customerName,
+            name: workshopData.name
+          }
+        });
+
         if (isDebugMode) {
           console.log(`[${requestId}] Workshop email sent successfully`);
         }
