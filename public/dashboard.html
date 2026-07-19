@@ -73,15 +73,6 @@
     .badge.status-resent { background: #fff3cd; color: #856404; }
     .badge.status-failed { background: #fbe9e7; color: #b23b2e; }
 
-    .resend-btn {
-      padding: 5px 12px; background: #fff; color: var(--brand); border: 1px solid var(--brand);
-      border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 12px;
-    }
-    .resend-btn:hover { background: var(--brand); color: #fff; }
-    .resend-btn:disabled { opacity: .5; cursor: default; }
-    .link-btn { background: none; border: none; color: var(--brand); font-weight: 600; cursor: pointer; font-size: 12px; padding: 5px 8px; }
-    .link-btn:hover { text-decoration: underline; }
-
     .muted { color: var(--muted); }
     .empty, .loading { text-align: center; padding: 40px; color: var(--muted); }
 
@@ -144,6 +135,28 @@
     .field select, .field input { display: block; width: 100%; margin-top: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 15px; font-family: inherit; text-transform: none; letter-spacing: normal; color: var(--text); }
     .modal-msg { min-height: 16px; font-size: 13px; color: var(--muted); }
     .modal-msg.error { color: #b23b2e; }
+
+    /* Row layout: recipient/date/type grouped, subject gets the room */
+    td.cell-meta { white-space: nowrap; vertical-align: top; }
+    .meta-to { font-weight: 600; color: var(--text); }
+    .meta-role { color: var(--muted); font-weight: 400; }
+    .meta-line { display: flex; align-items: center; gap: 8px; margin-top: 5px; flex-wrap: wrap; }
+    .meta-date { color: var(--muted); font-size: 12px; }
+    td.cell-subject { white-space: normal; width: 100%; vertical-align: top; }
+    .subj { color: var(--text); }
+    .subj-sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    td.cell-actions { text-align: right; vertical-align: top; width: 44px; }
+
+    .menu-btn { background: none; border: none; cursor: pointer; font-size: 20px; line-height: 1; color: var(--muted); padding: 2px 8px; border-radius: 6px; }
+    .menu-btn:hover { background: var(--bg); color: var(--brand); }
+    #row-menu {
+      position: fixed; z-index: 25; display: none; background: #fff; border: 1px solid var(--border);
+      border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,.15); min-width: 150px; overflow: hidden; padding: 4px 0;
+    }
+    #row-menu.show { display: block; }
+    .menu-item { display: block; width: 100%; text-align: left; background: none; border: none; padding: 9px 16px; font-size: 14px; color: var(--text); cursor: pointer; font-family: inherit; }
+    .menu-item:hover { background: var(--bg); color: var(--brand); }
+    .menu-item.hidden { display: none; }
   </style>
 </head>
 <body>
@@ -200,18 +213,13 @@
       <table>
         <thead>
           <tr>
-            <th>Sent</th>
-            <th>Type</th>
-            <th>To</th>
+            <th>Recipient</th>
             <th>Subject</th>
-            <th>Order</th>
-            <th>Amount</th>
-            <th>Status</th>
             <th></th>
           </tr>
         </thead>
         <tbody id="rows">
-          <tr><td colspan="8" class="loading">Loading…</td></tr>
+          <tr><td colspan="3" class="loading">Loading…</td></tr>
         </tbody>
       </table>
     </div>
@@ -228,6 +236,10 @@
 
   <div id="toast"></div>
   <div id="modal-overlay"><div id="modal-content"></div></div>
+  <div id="row-menu">
+    <button class="menu-item" data-act="view">View email</button>
+    <button class="menu-item" data-act="resend">Resend</button>
+  </div>
 
   <script type="module">
     import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
@@ -237,6 +249,7 @@
     let total = 0;
     let supabase = null;
     let currentUserEmail = '';
+    let menuCtx = null;
 
     const $ = (id) => document.getElementById(id);
 
@@ -421,32 +434,42 @@
 
     function renderRows(emails) {
       if (!emails.length) {
-        $('rows').innerHTML = '<tr><td colspan="8" class="empty">No emails match these filters.</td></tr>';
+        $('rows').innerHTML = '<tr><td colspan="3" class="empty">No emails match these filters.</td></tr>';
         return;
       }
       $('rows').innerHTML = emails.map((e) => {
         const canView = e.has_html || e.resend_message_id;
+        const sub = [e.webflow_order_id ? 'Order ' + esc(e.webflow_order_id) : '', fmtAmount(e.amount_cents) !== '—' ? fmtAmount(e.amount_cents) : '']
+          .filter(Boolean).join(' · ');
         return `
         <tr>
-          <td>${fmtDate(e.created_at)}</td>
-          <td><span class="badge ${e.email_type}">${typeLabel(e.email_type)}</span></td>
-          <td>${esc(e.to_email)}${e.recipient_role ? ` <span class="muted">(${e.recipient_role})</span>` : ''}</td>
-          <td class="wrap">${esc(e.subject)}</td>
-          <td>${esc(e.webflow_order_id || '—')}</td>
-          <td>${fmtAmount(e.amount_cents)}</td>
-          <td><span class="badge status-${e.status}">${e.status}</span></td>
-          <td class="actions">
-            ${canView ? `<button class="link-btn view-btn" data-id="${e.id}">View</button>` : ''}
-            <button class="resend-btn" data-id="${e.id}" data-to="${esc(e.to_email)}">Resend</button>
+          <td class="cell-meta">
+            <div class="meta-to">${esc(e.to_email)}${e.recipient_role ? ` <span class="meta-role">(${e.recipient_role})</span>` : ''}</div>
+            <div class="meta-line">
+              <span class="badge ${e.email_type}">${typeLabel(e.email_type)}</span>
+              <span class="badge status-${e.status}">${e.status}</span>
+              <span class="meta-date">${fmtDate(e.created_at)}</span>
+            </div>
+          </td>
+          <td class="cell-subject">
+            <div class="subj">${esc(e.subject)}</div>
+            ${sub ? `<div class="subj-sub">${sub}</div>` : ''}
+          </td>
+          <td class="cell-actions">
+            <button class="menu-btn" aria-label="Actions" data-id="${e.id}" data-to="${esc(e.to_email)}" data-canview="${canView ? '1' : '0'}">&#8943;</button>
           </td>
         </tr>`;
       }).join('');
 
-      document.querySelectorAll('.view-btn').forEach((btn) => {
-        btn.addEventListener('click', () => viewEmail(btn.dataset.id));
-      });
-      document.querySelectorAll('.resend-btn').forEach((btn) => {
-        btn.addEventListener('click', () => resend(btn));
+      document.querySelectorAll('.menu-btn').forEach((btn) => {
+        btn.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          const same = $('row-menu').classList.contains('show') && menuCtx && menuCtx.id === btn.dataset.id;
+          closeRowMenu();
+          if (!same) {
+            openRowMenu(btn, { id: btn.dataset.id, to: btn.dataset.to, canView: btn.dataset.canview === '1' });
+          }
+        });
       });
     }
 
@@ -462,13 +485,30 @@
       }
     }
 
-    async function resend(btn) {
-      const id = btn.dataset.id;
-      const to = btn.dataset.to;
+    // ---- Row actions dropdown ------------------------------------------------
+    function openRowMenu(btn, ctx) {
+      menuCtx = ctx;
+      const menu = $('row-menu');
+      menu.querySelector('[data-act="view"]').classList.toggle('hidden', !ctx.canView);
+      menu.classList.add('show');
+      const rect = btn.getBoundingClientRect();
+      let left = rect.right - menu.offsetWidth;
+      if (left < 8) left = 8;
+      let top = rect.bottom + 4;
+      if (top + menu.offsetHeight > window.innerHeight - 8) {
+        top = rect.top - menu.offsetHeight - 4;
+      }
+      menu.style.left = left + 'px';
+      menu.style.top = top + 'px';
+    }
+    function closeRowMenu() {
+      $('row-menu').classList.remove('show');
+      menuCtx = null;
+    }
+
+    async function resend(id, to) {
       const ok = await confirmModal(`Resend this email to ${to}?`, 'Resend');
       if (!ok) return;
-      btn.disabled = true;
-      btn.textContent = 'Sending…';
       try {
         const res = await authedFetch('/api/dashboard/resend', {
           method: 'POST',
@@ -482,8 +522,6 @@
         load();
       } catch (err) {
         toast(err.message, true);
-        btn.disabled = false;
-        btn.textContent = 'Resend';
       }
     }
 
@@ -498,7 +536,7 @@
       params.set('limit', PAGE_SIZE);
       params.set('offset', offset);
 
-      $('rows').innerHTML = '<tr><td colspan="8" class="loading">Loading…</td></tr>';
+      $('rows').innerHTML = '<tr><td colspan="3" class="loading">Loading…</td></tr>';
 
       try {
         const res = await authedFetch('/api/dashboard/emails?' + params.toString());
@@ -510,7 +548,7 @@
         total = data.pagination.total;
         updatePager();
       } catch (err) {
-        $('rows').innerHTML = '<tr><td colspan="8" class="empty">Could not load emails.</td></tr>';
+        $('rows').innerHTML = '<tr><td colspan="3" class="empty">Could not load emails.</td></tr>';
         toast(err.message, true);
       }
     }
@@ -568,8 +606,25 @@
         if (e.target === $('modal-overlay')) dismissModal();
       });
       document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && $('modal-overlay').classList.contains('show')) dismissModal();
+        if (e.key !== 'Escape') return;
+        if ($('modal-overlay').classList.contains('show')) dismissModal();
+        else closeRowMenu();
       });
+
+      // Row-action dropdown
+      $('row-menu').querySelector('[data-act="view"]').addEventListener('click', () => {
+        const c = menuCtx; closeRowMenu(); if (c) viewEmail(c.id);
+      });
+      $('row-menu').querySelector('[data-act="resend"]').addEventListener('click', () => {
+        const c = menuCtx; closeRowMenu(); if (c) resend(c.id, c.to);
+      });
+      document.addEventListener('click', (e) => {
+        if ($('row-menu').classList.contains('show') && !$('row-menu').contains(e.target) && !e.target.classList.contains('menu-btn')) {
+          closeRowMenu();
+        }
+      });
+      window.addEventListener('scroll', closeRowMenu, true);
+      window.addEventListener('resize', closeRowMenu);
     }
 
     async function init() {
